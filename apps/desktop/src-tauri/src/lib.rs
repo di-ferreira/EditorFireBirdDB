@@ -54,3 +54,41 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("falha ao iniciar o Firebird Studio Linux");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_health_reporta_ok_e_versao_semantica_do_crate() {
+        let health = app_health();
+
+        assert_eq!(health.status, "ok");
+        // A versão entregue é sempre `major.minor[.patch]`, derivada do
+        // `CARGO_PKG_VERSION` deste crate — nunca o texto cru.
+        let esperada = ServerVersion::parse(env!("CARGO_PKG_VERSION"))
+            .map(|v| match v.patch {
+                Some(patch) => format!("{}.{}.{}", v.major, v.minor, patch),
+                None => format!("{}.{}", v.major, v.minor),
+            })
+            .expect("versão do crate é semântica");
+        assert_eq!(health.domain_version, esperada);
+        assert!(
+            ServerVersion::parse(&health.domain_version).is_some(),
+            "domain_version deve continuar parseável pelo domínio"
+        );
+    }
+
+    #[test]
+    fn capabilities_nao_concedem_permissoes_alem_de_core_default() {
+        // O arquivo `capabilities/default.json` é lido em runtime pelo Tauri;
+        // esta é uma trava de regressão documental: se alguém adicionar
+        // permissão extra (fs/shell), este teste falha até ser atualizado
+        // junto da revisão de segurança (Spec 11 §1).
+        let conteudo = include_str!("../capabilities/default.json");
+
+        assert!(conteudo.contains(r#""permissions": ["core:default"]"#));
+        assert!(!conteudo.contains("fs:"));
+        assert!(!conteudo.contains("shell:"));
+    }
+}
