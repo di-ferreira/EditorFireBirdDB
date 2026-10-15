@@ -13,8 +13,8 @@ pub mod storage;
 
 use application::estado::AppState;
 use commands::{
-    connection_close, connection_get_status, connection_list_profiles, connection_open,
-    connection_save_profile, connection_test_profile,
+    catalog_get_node, connection_close, connection_get_status, connection_list_profiles,
+    connection_open, connection_save_profile, connection_test_profile,
 };
 use firebird_domain::VERSION as DOMAIN_VERSION;
 use tauri::Manager;
@@ -33,6 +33,9 @@ pub const NOMES_DOS_COMANDOS_DE_CONEXAO: [&str; 6] = [
     "connection_close",
     "connection_get_status",
 ];
+
+/// Nomes dos comandos de catálogo registrados no `invoke_handler`.
+pub const NOMES_DOS_COMANDOS_DE_CATALOGO: [&str; 1] = ["catalog_get_node"];
 
 /// Resposta do comando [`app_health`], serializada para a UI.
 #[derive(Debug, serde::Serialize)]
@@ -79,6 +82,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_health,
+            catalog_get_node,
             connection_list_profiles,
             connection_save_profile,
             connection_test_profile,

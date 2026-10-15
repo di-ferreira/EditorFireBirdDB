@@ -10,3 +10,5 @@ pub mod estado;
 
 #[cfg(test)]
 pub mod fakes;
+
+pub mod catalogo;

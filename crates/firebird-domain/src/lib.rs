@@ -4,6 +4,7 @@
 //! `thiserror` para erros tipados. Ver [`ServerVersion`], [`DomainError`] e
 //! os modelos de metadados em [`metadata`].
 
+pub mod catalog;
 pub mod connection;
 pub mod error;
 pub mod metadata;
@@ -16,6 +17,10 @@ pub mod version;
 /// versão de si mesmo).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+pub use catalog::{
+    CategoriaCatalogo, ConstraintInfo, ConstraintTipo, DominioInfo, GeneratorInfo, IndiceInfo,
+    InfoBanco, ParametroInfo, ProceduraInfo, TriggerInfo,
+};
 pub use connection::{
     ConnectionProfile, ConnectionStatus, DadosPerfil, PersistedProfile, ProfileError, SqlDialect,
     TIMEOUT_MAXIMO_MS, TIMEOUT_PADRAO_MS,

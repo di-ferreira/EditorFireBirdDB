@@ -148,6 +148,8 @@ struct EstadoSessao {
     /// Conexão viva; [`None`] quando não há sessão (o adapter é devolvido em
     /// [`ConnectionManager::fechar`]).
     adaptador: Option<AdaptadorAberto>,
+    /// Versão do servidor reportada na abertura (informativa).
+    server_version: Option<ServerVersion>,
 }
 
 /// Situação pública de um perfil, separada do perfil salvo.
@@ -341,6 +343,7 @@ impl ConnectionManager {
                     estado.session_id = Some(session_id.clone());
                     estado.client_library_path = client_library_path.clone();
                     estado.adaptador = Some(adaptador);
+                    estado.server_version = versao;
                 });
                 Ok(SessaoAberta {
                     profile_id: profile_id.to_string(),
@@ -387,6 +390,38 @@ impl ConnectionManager {
         Ok(self.informacoes(profile_id))
     }
 
+    /// Executa `acao` contra o adaptador vivo do perfil conectado.
+    /// Falha com erro de conexão quando o perfil não existe, não está
+    /// conectado ou não tem adaptador — nunca aloca sem sessão. O lock da
+    /// tabela de sessões é mantido durante a chamada (a ação não pode reentrar
+    /// neste gerenciador); queries de catálogo aceitam isso.
+    pub fn executar_no_adaptador_conectado<F, T>(
+        &self,
+        profile_id: &str,
+        acao: F,
+    ) -> Result<T, ErroGerente>
+    where
+        F: FnOnce(&mut AdaptadorAberto) -> Result<T, ErroGerente>,
+    {
+        // Confere que o perfil salvo existe, antes de anything else.
+
+        self.obter(profile_id)?;
+        let mut sessoes = self.lock();
+        let estado = sessoes
+            .get_mut(profile_id)
+            .ok_or_else(|| ErroGerente::PerfilNaoEncontrado(profile_id.to_string()))?;
+        if !matches!(estado.status, ConnectionStatus::Connected) {
+            return Err(ErroGerente::Conexao(format!(
+                "o perfil {} não está conectado",
+                profile_id
+            )));
+        }
+        let adaptador = estado.adaptador.as_mut().ok_or_else(|| {
+            ErroGerente::Conexao("sem adaptador vivo para esta sessão".to_string())
+        })?;
+        acao(adaptador)
+    }
+
     /// Reconecta o perfil, usando a senha já guardada no cofre.
     ///
     /// Passa por [`ConnectionStatus::Reconnecting`] antes da nova tentativa,
@@ -405,12 +440,13 @@ impl ConnectionManager {
             .ok_or_else(|| ErroGerente::SegredoAusente(profile_id.to_string()))?;
 
         match self.conectar(&perfil, &senha) {
-            Ok((adaptador, biblioteca, _)) => {
+            Ok((adaptador, biblioteca, versao)) => {
                 self.marcar(profile_id, |estado| {
                     estado.status = ConnectionStatus::Connected;
                     estado.session_id = Some(novo_id("sessao"));
                     estado.client_library_path = biblioteca.clone();
                     estado.adaptador = Some(adaptador);
+                    estado.server_version = versao;
                 });
             }
             Err(erro) => {
@@ -515,6 +551,7 @@ impl ConnectionManager {
                 session_id: None,
                 client_library_path: None,
                 adaptador: None,
+                server_version: None,
             });
         mudanca(estado);
     }

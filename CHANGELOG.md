@@ -33,6 +33,25 @@ Baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
     próprio container; Dependabot para cargo e npm.
   - Plano da Fase 1 em `docs/plans/2026-10-15-fase1-fundacao.md` e backlog herdado
     da Fase 0 em `docs/plans/2026-10-15-backlog-fase1-heranca-da-fase0.md`.
+- **Fase 2 — Passo 1: catálogo do DB Explorer (sob demanda + refresh)**:
+  - Modelos puros em `firebird_domain::catalog` (InfoBanco, IndiceInfo,
+    ConstraintInfo, DominioInfo, GeneratorInfo, ProceduraInfo, ParametroInfo,
+    TriggerInfo, CategoriaCatalogo x7).
+  - `MetadataRepository`: consultas `RDB$` versionadas para informações do banco,
+    relações filtráveis (incl. `include_system`), índices, constraints, domínios,
+    generators, procedures (+parâmetros) e triggers; compatibilidade provada nas
+    versões 2.5/3.0/4.0 (5.0 pendente de host com glibc ≥ 2.36).
+  - `CatalogoService` (SPA) com cache por sessão (apenas sem filtro) e
+    `forceRefresh`; comando Tauri `catalog_get_node` (`profileId, node, filter,
+    includeSystem, forceRefresh`) devolvendo DOI `CatalogNodeDto` com **um nível**
+    de filhos — cada filho carrega o próprio `request` (lazy).
+  - `ConnectionManager::executar_no_adaptador_conectado` e correção real de
+    `server_version` registrada na sessão.
+  - UI `features/db-explorer` (árvore lazy com expandir/recolher, refresh por nó
+    e da árvore, busca com debounce, marcação de objeto de sistema, detalhe,
+    navegação por teclado `role=tree` com `aria-expanded`/`aria-level`, estados
+    de carregamento/vazio/erro, pt-BR) integrada como aba "Explorador"; perfis
+    conectados vêm dos comandos de conexão já existentes.
 - Estrutura inicial do repositório (monorepo pnpm + workspace Cargo Rust).
 - Especificação técnica extraída por tema em `docs/specs/` (17 documentos, do documento
   original v0.1 preservado em `docs/original/`).

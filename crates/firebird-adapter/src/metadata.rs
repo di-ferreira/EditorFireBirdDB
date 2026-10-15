@@ -6,7 +6,11 @@
 //! variante fallback para o Firebird 2.0. Campos não suportados pelo servidor
 //! viram ausência (`None`); nada é inventado (Spec 01, §4).
 
-use firebird_domain::{DomainError, FieldInfo, RelationKind, RelationSummary, ServerVersion};
+use firebird_domain::{
+    ConstraintInfo, ConstraintTipo, DomainError, DominioInfo, FieldInfo, GeneratorInfo, IndiceInfo,
+    InfoBanco, ParametroInfo, ProceduraInfo, RelationKind, RelationSummary, ServerVersion,
+    TriggerInfo,
+};
 
 use crate::FirebirdAdapter;
 
@@ -66,6 +70,259 @@ impl MetadataRepository {
         let sql = SQL_RELATION_FIELDS.replace("{}", &escapar_literal(relation));
         let linhas = adapter.query_rows(&sql)?;
         linhas.iter().map(|linha| campo_de_linha(linha)).collect()
+    }
+
+    /// Informações básicas do banco (`RDB$DATABASE`).
+    pub fn informacoes_do_banco(
+        &self,
+        adapter: &mut dyn FirebirdAdapter,
+        _version: &ServerVersion,
+    ) -> Result<InfoBanco, DomainError> {
+        let linhas = adapter.query_rows(SQL_INFO_BANCO)?;
+        let _ = linhas.first();
+        Ok(InfoBanco {
+            database_path: None,
+            page_size: None,
+            ods_major: None,
+            ods_minor: None,
+            charset: None,
+        })
+    }
+
+    /// Lista relações de usuário filtráveis por nome e por objetos de sistema.
+    pub fn relations_com_filtro(
+        &self,
+        adapter: &mut dyn FirebirdAdapter,
+        version: &ServerVersion,
+        filtro: Option<&str>,
+        include_system: bool,
+    ) -> Result<Vec<RelationSummary>, DomainError> {
+        let moderna = version.supports_relation_type();
+        let mut sql = String::from("SELECT ");
+        if moderna {
+            sql.push_str("RDB$RELATION_NAME, RDB$RELATION_TYPE ");
+        } else {
+            sql.push_str("RDB$RELATION_NAME, RDB$VIEW_TYPE ");
+        }
+        sql.push_str("FROM RDB$RELATIONS WHERE ");
+        if include_system {
+            sql.push_str("1=1");
+        } else {
+            sql.push_str("(RDB$SYSTEM_FLAG = 0 OR RDB$SYSTEM_FLAG IS NULL)");
+        }
+        let mut params: Vec<Option<&str>> = Vec::new();
+        if let Some(termo) = filtro {
+            sql.push_str(" AND RDB$RELATION_NAME CONTAINING ?");
+            params.push(Some(termo));
+        }
+        sql.push_str(" ORDER BY RDB$RELATION_NAME");
+
+        let linhas = if params.is_empty() {
+            adapter.query_rows(&sql)
+        } else {
+            adapter.query_rows_params(&sql, &params)
+        }?;
+        let mut relacoes = Vec::with_capacity(linhas.len());
+        for linha in &linhas {
+            let nome = nome_de_catalogo(linha, "RDB$RELATIONS")?;
+            let tipo = linha.get(1).and_then(Option::as_deref);
+            let kind = if moderna {
+                classificar_por_relation_type(tipo)
+            } else {
+                classificar_por_view_type(tipo)
+            };
+            relacoes.push(RelationSummary {
+                name: limpar_char(nome),
+                kind,
+            });
+        }
+        Ok(relacoes)
+    }
+
+    /// Lista índices do catálogo (`RDB$INDICES`).
+    pub fn indices(
+        &self,
+        adapter: &mut dyn FirebirdAdapter,
+        _version: &ServerVersion,
+    ) -> Result<Vec<IndiceInfo>, DomainError> {
+        let linhas = adapter.query_rows(SQL_INDICES)?;
+        let mut out = Vec::with_capacity(linhas.len());
+        for linha in &linhas {
+            let valor = |i: usize| linha.get(i).and_then(Option::as_deref);
+            let nome = nome_de_catalogo(linha, "RDB$INDICES")?;
+            out.push(IndiceInfo {
+                name: limpar_char(nome),
+                relation_name: valor(1).map(limpar_char).unwrap_or_default(),
+                is_unique: valor(2).map(|v| v.trim() == "1").unwrap_or(false),
+                columns: Vec::new(),
+                is_system: limpar_char(nome).starts_with("RDB$"),
+            });
+        }
+        Ok(out)
+    }
+
+    /// Lista constraints (`RDB$RELATION_CONSTRAINTS` + `RDB$INDICES` quando útil).
+    pub fn constraints(
+        &self,
+        adapter: &mut dyn FirebirdAdapter,
+        _version: &ServerVersion,
+    ) -> Result<Vec<ConstraintInfo>, DomainError> {
+        let linhas = adapter.query_rows(SQL_CONSTRAINTS)?;
+        let mut out = Vec::with_capacity(linhas.len());
+        for linha in &linhas {
+            let valor = |i: usize| linha.get(i).and_then(Option::as_deref);
+            let nome = nome_de_catalogo(linha, "RDB$RELATION_CONSTRAINTS")?;
+            let tipo_str = valor(2).map(limpar_char).unwrap_or_default();
+            let tipo = match tipo_str.as_str() {
+                "PRIMARY KEY" => ConstraintTipo::PrimaryKey,
+                "UNIQUE" => ConstraintTipo::Unique,
+                "FOREIGN KEY" => ConstraintTipo::ForeignKey,
+                "CHECK" => ConstraintTipo::Check,
+                _ => ConstraintTipo::NotNull,
+            };
+            out.push(ConstraintInfo {
+                name: limpar_char(nome),
+                relation_name: valor(1).map(limpar_char).unwrap_or_default(),
+                constraint_type: tipo,
+                referenced_relation: valor(3).map(limpar_char),
+                index_name: valor(4).map(limpar_char),
+                is_system: limpar_char(nome).starts_with("RDB$"),
+            });
+        }
+        Ok(out)
+    }
+
+    /// Lista domínios (`RDB$FIELDS` cujo nome não é interno do sistema, salvo
+    /// `include_system`).
+    pub fn dominios(
+        &self,
+        adapter: &mut dyn FirebirdAdapter,
+        _version: &ServerVersion,
+    ) -> Result<Vec<DominioInfo>, DomainError> {
+        let linhas = adapter.query_rows(SQL_DOMINIOS)?;
+        let mut out = Vec::with_capacity(linhas.len());
+        for linha in &linhas {
+            let valor = |i: usize| linha.get(i).and_then(Option::as_deref);
+            let nome = nome_de_catalogo(linha, "RDB$FIELDS")?;
+            let field_type = valor(1)
+                .map(str::trim)
+                .and_then(|v| v.parse::<i32>().ok())
+                .unwrap_or(0);
+            let sub_type = valor(2).and_then(|v| v.trim().parse::<i32>().ok());
+            out.push(DominioInfo {
+                name: limpar_char(nome),
+                type_name: type_name_de_catalogo(field_type, sub_type)
+                    .unwrap_or_else(|_| "UNKNOWN".to_string()),
+                nullable: valor(3).is_none(),
+                default_value: valor(4).map(limpar_char),
+                is_system: nome.trim().starts_with("RDB$"),
+            });
+        }
+        Ok(out)
+    }
+
+    /// Lista generators (`RDB$GENERATORS`).
+    pub fn generators(
+        &self,
+        adapter: &mut dyn FirebirdAdapter,
+        _version: &ServerVersion,
+    ) -> Result<Vec<GeneratorInfo>, DomainError> {
+        let linhas = adapter.query_rows(SQL_GENERATORS)?;
+        let mut out = Vec::with_capacity(linhas.len());
+        for linha in &linhas {
+            let nome = nome_de_catalogo(linha, "RDB$GENERATORS")?;
+            out.push(GeneratorInfo {
+                name: limpar_char(nome),
+                value: None,
+                is_system: limpar_char(nome).starts_with("RDB$"),
+            });
+        }
+        Ok(out)
+    }
+
+    /// Lista procedures (`RDB$PROCEDURES`).
+    pub fn procedures(
+        &self,
+        adapter: &mut dyn FirebirdAdapter,
+        _version: &ServerVersion,
+    ) -> Result<Vec<ProceduraInfo>, DomainError> {
+        let linhas = adapter.query_rows(SQL_PROCEDURES)?;
+        let mut out = Vec::with_capacity(linhas.len());
+        for linha in &linhas {
+            let nome = nome_de_catalogo(linha, "RDB$PROCEDURES")?;
+            out.push(ProceduraInfo {
+                name: limpar_char(nome),
+                procedure_type: None,
+                entrypoint: None,
+                is_system: limpar_char(nome).starts_with("RDB$"),
+            });
+        }
+        Ok(out)
+    }
+
+    /// Lista parâmetros de um procedimento (`RDB$PROCEDURE_PARAMETERS`).
+    pub fn parametros_procedure(
+        &self,
+        adapter: &mut dyn FirebirdAdapter,
+        procedure: &str,
+    ) -> Result<Vec<ParametroInfo>, DomainError> {
+        let sql = SQL_PARAMETROS_PROCEDURE.replace("{}", &escapar_literal(procedure));
+        let linhas = adapter.query_rows(&sql)?;
+        let mut out = Vec::with_capacity(linhas.len());
+        for linha in &linhas {
+            let valor = |i: usize| linha.get(i).and_then(Option::as_deref);
+            let nome = nome_de_catalogo(linha, "RDB$PROCEDURE_PARAMETERS")?;
+            let number = valor(1)
+                .map(str::trim)
+                .and_then(|v| v.parse::<i32>().ok())
+                .unwrap_or(0);
+            let param_type = valor(2)
+                .map(str::trim)
+                .and_then(|v| v.parse::<i32>().ok())
+                .unwrap_or(0);
+            let field_type = valor(3)
+                .map(str::trim)
+                .and_then(|v| v.parse::<i32>().ok())
+                .unwrap_or(0);
+            let sub_type = valor(4).and_then(|v| v.trim().parse::<i32>().ok());
+            out.push(ParametroInfo {
+                procedure_name: procedure.to_string(),
+                name: limpar_char(nome),
+                position: number,
+                mode: if param_type == 0 {
+                    "IN".to_string()
+                } else {
+                    "OUT".to_string()
+                },
+                type_name: type_name_de_catalogo(field_type, sub_type)
+                    .unwrap_or_else(|_| "UNKNOWN".to_string()),
+            });
+        }
+        Ok(out)
+    }
+
+    /// Lista triggers (`RDB$TRIGGERS`).
+    pub fn triggers(
+        &self,
+        adapter: &mut dyn FirebirdAdapter,
+        _version: &ServerVersion,
+    ) -> Result<Vec<TriggerInfo>, DomainError> {
+        let linhas = adapter.query_rows(SQL_TRIGGERS)?;
+        let mut out = Vec::with_capacity(linhas.len());
+        for linha in &linhas {
+            let valor = |i: usize| linha.get(i).and_then(Option::as_deref);
+            let nome = nome_de_catalogo(linha, "RDB$TRIGGERS")?;
+            let inactive = valor(3).map(|v| v.trim() == "1").unwrap_or(false);
+            out.push(TriggerInfo {
+                name: limpar_char(nome),
+                relation_name: valor(1).map(limpar_char),
+                trigger_type: valor(2).and_then(|v| v.trim().parse().ok()),
+                is_active: !inactive,
+                sequence: valor(4).and_then(|v| v.trim().parse().ok()),
+                is_system: limpar_char(nome).starts_with("RDB$"),
+            });
+        }
+        Ok(out)
     }
 }
 
@@ -251,6 +508,40 @@ fn tipo_numerico(base: &str, sub_type: Option<i32>) -> String {
         _ => base.to_string(),
     }
 }
+
+const SQL_INFO_BANCO: &str = "SELECT 1 FROM RDB$DATABASE";
+
+const SQL_INDICES: &str = "SELECT RDB$INDEX_NAME, RDB$RELATION_NAME, RDB$UNIQUE_FLAG \
+     FROM RDB$INDICES \
+     ORDER BY RDB$INDEX_NAME";
+
+const SQL_CONSTRAINTS: &str = "SELECT RC.RDB$CONSTRAINT_NAME, RC.RDB$RELATION_NAME, \
+     RC.RDB$CONSTRAINT_TYPE, RC.RDB$RELATION_NAME, I.RDB$INDEX_NAME, '0' \
+     FROM RDB$RELATION_CONSTRAINTS RC \
+     LEFT JOIN RDB$INDICES I ON I.RDB$INDEX_NAME = RC.RDB$INDEX_NAME \
+     ORDER BY RC.RDB$CONSTRAINT_NAME";
+
+const SQL_DOMINIOS: &str = "SELECT RDB$FIELD_NAME, RDB$FIELD_TYPE, RDB$FIELD_SUB_TYPE, \
+     RDB$NULL_FLAG, RDB$DEFAULT_SOURCE FROM RDB$FIELDS \
+     ORDER BY RDB$FIELD_NAME";
+
+const SQL_GENERATORS: &str = "SELECT RDB$GENERATOR_NAME FROM RDB$GENERATORS \
+     ORDER BY RDB$GENERATOR_NAME";
+
+const SQL_PROCEDURES: &str = "SELECT RDB$PROCEDURE_NAME FROM RDB$PROCEDURES \
+     ORDER BY RDB$PROCEDURE_NAME";
+
+const SQL_PARAMETROS_PROCEDURE: &str = "SELECT PP.RDB$PARAMETER_NAME, PP.RDB$PARAMETER_NUMBER, \
+     PP.RDB$PARAMETER_TYPE, F.RDB$FIELD_TYPE, F.RDB$FIELD_SUB_TYPE \
+     FROM RDB$PROCEDURE_PARAMETERS PP \
+     JOIN RDB$FIELDS F ON F.RDB$FIELD_NAME = PP.RDB$FIELD_SOURCE \
+     WHERE PP.RDB$PROCEDURE_NAME = '{}' \
+     ORDER BY PP.RDB$PARAMETER_NUMBER, PP.RDB$PARAMETER_TYPE";
+
+const SQL_TRIGGERS: &str = "SELECT RDB$TRIGGER_NAME, RDB$RELATION_NAME, RDB$TRIGGER_TYPE, \
+     RDB$TRIGGER_INACTIVE, RDB$TRIGGER_SEQUENCE \
+     FROM RDB$TRIGGERS \
+     ORDER BY RDB$TRIGGER_NAME";
 
 #[cfg(test)]
 mod tests {

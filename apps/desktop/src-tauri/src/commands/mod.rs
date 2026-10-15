@@ -4,10 +4,12 @@
 //! serviço de [`crate::application`] e traduz o resultado em DTO ou em
 //! [`error::CommandError`] (`{ code, message }`, já redigido).
 
+pub mod catalogo;
 pub mod connections;
 pub mod dto;
 pub mod error;
 
+pub use catalogo::catalog_get_node;
 pub use connections::{
     connection_close, connection_get_status, connection_list_profiles, connection_open,
     connection_save_profile, connection_test_profile,

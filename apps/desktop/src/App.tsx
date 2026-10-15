@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type JSX } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 import ConnectionsPanel from "./features/connections/ConnectionsPanel";
+import DbExplorerPanel from "./features/db-explorer/DbExplorerPanel";
 
 /**
  * Resposta do comando Rust `app_health` (src-tauri/src/lib.rs).
@@ -77,11 +78,12 @@ const estilos = {
 };
 
 /** Abas da janela principal (Spec 11 §3: navegação por teclado, foco visível). */
-type Aba = "saude" | "conexoes";
+type Aba = "saude" | "conexoes" | "explorador";
 
 const ABAS: { id: Aba; rotulo: string }[] = [
   { id: "saude", rotulo: "Saúde" },
   { id: "conexoes", rotulo: "Conexões" },
+  { id: "explorador", rotulo: "Explorador" },
 ];
 
 /**
@@ -173,6 +175,16 @@ export default function App(): JSX.Element {
         >
           {/* Montado apenas quando a aba é aberta: a UI inicia sem I/O de conexões. */}
           {aba === "conexoes" && <ConnectionsPanel />}
+        </div>
+
+        <div
+          role="tabpanel"
+          id="painel-explorador"
+          aria-labelledby="aba-explorador"
+          hidden={aba !== "explorador"}
+        >
+          {/* Montado apenas quando a aba é aberta. */}
+          {aba === "explorador" && <DbExplorerPanel />}
         </div>
       </div>
     </main>
