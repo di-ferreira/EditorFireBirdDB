@@ -1,0 +1,45 @@
+# --- Node / pnpm ---
+node_modules/
+dist/
+dist-electron/
+*.local
+.pnpm-store/
+
+# --- Rust / Cargo ---
+target/
+**/*.rs.bk
+Cargo.lock.orig
+
+# --- Build de apps desktop ---
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/target/
+*.deb
+*.AppImage
+*.rpm
+
+# --- Bancos locais de desenvolvimento (nunca versionar) ---
+*.fdb
+*.FDB
+*.sqlite
+*.sqlite3
+*.db
+
+# --- Segredos e configuração local ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+
+# --- IDE / editor ---
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store
+
+# --- Logs e cobertura ---
+*.log
+coverage/
+lcov.info

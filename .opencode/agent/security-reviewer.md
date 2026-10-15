@@ -29,6 +29,6 @@ antes de merge, com foco nos riscos da Spec 11 e da Spec 08 (§5).
 
 ## Formato do relatório
 
-Para cada achado: **severidade** (crítica/alta/média/baixa), **arquivo:l linha**, **risco**
+Para cada achado: **severidade** (crítica/alta/média/baixa), **arquivo:linha**, **risco**
 e **correção sugerida**. Se não houver achados, declare "aprovado" com o que foi
 verificado. Responda em português brasileiro.
