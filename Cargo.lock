@@ -843,6 +843,7 @@ version = "0.1.0"
 dependencies = [
  "firebird-domain",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
 ]

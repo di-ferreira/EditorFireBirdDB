@@ -19,3 +19,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 firebird-domain = { path = "../../../crates/firebird-domain" }
+
+[dev-dependencies]
+# Usado apenas nos testes: validação de que as capabilities concedem
+# exatamente `core:default` (ver src/lib.rs).
+serde_json = "1"

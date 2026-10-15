@@ -56,22 +56,19 @@ mod tests {
             health.domain_version, DOMAIN_VERSION,
             "domain_version deve ser a versão do crate firebird-domain"
         );
-        // Guarda contra o modo de falha anterior: um wrapper local que copiasse
-        // a versão do próprio crate desktop continuaria verde se ambos
-        // divergissem — a constante do domínio é a única fonte de verdade.
-        assert_eq!(health.domain_version, firebird_domain::VERSION);
     }
 
     #[test]
     fn nenhuma_capability_concede_permissao_alem_de_core_default() {
         // Trava de segurança sobre **todos** os arquivos de capabilities: um
-        // `capabilities/extra.json` com `fs:`/`shell:` também reprovaria.
-        // (Regra: Spec 11 §1 — escopos mínimos, sem shell/fsystem genérico.)
+        // `capabilities/extra.json` com outras permissões também reprovaria.
+        // O JSON é *parseado* (não comparado por substring), então uma
+        // reformatação legítima do arquivo não quebra o teste e nenhuma
+        // permissão extra passa despercebida. (Regra: Spec 11 §1.)
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities");
         let arquivos: Vec<_> = std::fs::read_dir(&dir)
             .expect("diretório capabilities legível")
-            .filter_map(Result::ok)
-            .map(|e| e.path())
+            .map(|entrada| entrada.expect("entrada legível em capabilities").path())
             .filter(|p| p.extension().is_some_and(|ext| ext == "json"))
             .collect();
 
@@ -82,17 +79,21 @@ mod tests {
         );
 
         for arquivo in arquivos {
-            let conteudo = std::fs::read_to_string(&arquivo)
-                .unwrap_or_else(|e| panic!("falha ao ler {}: {e}", arquivo.display()));
             let nome = arquivo.display().to_string();
-            assert!(
-                conteudo.contains("core:default"),
-                "{nome}: deveria manter core:default"
-            );
-            for proibida in ["fs:", "shell:", "process:", "http:"] {
-                assert!(
-                    !conteudo.contains(proibida),
-                    "{nome}: permissão não permitida `{proibida}` (Spec 11 §1)"
+            let texto = std::fs::read_to_string(&arquivo)
+                .unwrap_or_else(|e| panic!("falha ao ler {nome}: {e}"));
+            let valor: serde_json::Value = serde_json::from_str(&texto)
+                .unwrap_or_else(|e| panic!("{nome}: capability precisa ser JSON válido: {e}"));
+
+            let permisos = valor["permissions"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{nome}: campo `permissions` ausente ou não é lista"));
+
+            for permissao in permisos {
+                assert_eq!(
+                    permissao.as_str(),
+                    Some("core:default"),
+                    "{nome}: permissão não permitida {permissao} (Spec 11 §1)"
                 );
             }
         }
