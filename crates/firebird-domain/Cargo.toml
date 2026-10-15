@@ -1,0 +1,9 @@
+[package]
+name = "firebird-domain"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Domínio puro do Firebird Studio Linux: versão do servidor, erros tipados e modelos de metadados."
+
+[dependencies]
+thiserror = "2"
