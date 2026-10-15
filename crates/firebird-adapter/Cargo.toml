@@ -1,0 +1,15 @@
+[package]
+name = "firebird-adapter"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Adapter Firebird do Firebird Studio Linux: descoberta e validação da libfbclient, parâmetros de conexão redigidos e trait comum de driver (Fase 0 — prova de conceito)."
+
+[dependencies]
+firebird-domain = { path = "../firebird-domain" }
+# default-features = false é essencial: a feature default "linking" do rsfbclient
+# força -lfbclient em tempo de link (busca da lib em compile time). A Fase 0 usa
+# apenas carregamento dinâmico em runtime via DynLoad (Spec 01, §3).
+rsfbclient = { version = "0.29", default-features = false, features = ["dynamic_loading"] }
+rsfbclient-native = { version = "0.29", features = ["dynamic_loading"] }
+thiserror = "2"
