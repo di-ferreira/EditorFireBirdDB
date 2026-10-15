@@ -1,0 +1,16 @@
+[package]
+name = "firebird-security"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Cofre de segredos do sistema operacional do Firebird Studio Linux: acesso a senhas via Secret Service/libsecret, sem vazamento em log ou erro."
+
+[features]
+default = []
+# Expõe `InMemorySecretStore` fora dos testes (ex.: suíte de integração ou
+# ferramentas de desenvolvimento). Nunca usar em produção: segredos em RAM.
+in-memory = []
+
+[dependencies]
+keyring = "4"
+thiserror = "2"
