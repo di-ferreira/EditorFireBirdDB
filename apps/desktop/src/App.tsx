@@ -81,8 +81,8 @@ export default function App(): JSX.Element {
         )}
 
         {estado.fase === "sucesso" && (
-          <div>
-            <p role="status">
+          <div role="status" aria-live="polite">
+            <p>
               Firebird Studio Linux — domínio {estado.health.domain_version}
             </p>
             <p style={{ color: "#4a4d52" }}>

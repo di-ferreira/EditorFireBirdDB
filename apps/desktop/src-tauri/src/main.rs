@@ -2,10 +2,9 @@
 //!
 //! Toda a inicialização (Tauri builder, janela e comandos) vive em
 //! [`firebird_studio_desktop::run`]; este binário apenas o aciona.
-
-// Em release, suprime o console no Windows (a plataforma-alvo é Linux; a
-// atribuição é mantida por compatibilidade com o template do Tauri).
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+//!
+//! Plataforma-alvo: Linux (Spec 01 §1) — sem atributos de subsistema
+//! específicos de outra plataforma.
 
 fn main() {
     firebird_studio_desktop::run();

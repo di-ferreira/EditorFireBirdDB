@@ -8,6 +8,29 @@ pub mod error;
 pub mod metadata;
 pub mod version;
 
+/// Versão do crate de domínio (`Cargo.toml`), exposta para a UI do app.
+///
+/// Permite que a fronteira Tauri reporte a versão **real** do domínio sem
+/// reimplementar `env!("CARGO_PKG_VERSION")` no crate desktop (que leria a
+/// versão de si mesmo).
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub use error::DomainError;
 pub use metadata::{FieldInfo, RelationKind, RelationSummary};
 pub use version::ServerVersion;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn versao_e_semantica_e_pode_ser_lida_pelo_analisador_do_dominio() {
+        // `ServerVersion` valida o formato `major.minor[.patch]`; se um dia a
+        // versão do crate deixar de ser semântica, este teste avisa antes de
+        // a UI exibir algo inesperado.
+        assert!(
+            ServerVersion::parse(VERSION).is_some(),
+            "VERSION ({VERSION}) deveria ser parseável por ServerVersion"
+        );
+    }
+}

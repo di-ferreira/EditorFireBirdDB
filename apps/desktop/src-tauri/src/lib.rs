@@ -6,44 +6,32 @@
 //! diretamente pela UI. As permissões da webview ficam em
 //! `capabilities/default.json` (apenas `core:default`).
 
-use firebird_domain::ServerVersion;
+use firebird_domain::VERSION as DOMAIN_VERSION;
 
 /// Resposta do comando [`app_health`], serializada para a UI.
 #[derive(Debug, serde::Serialize)]
 pub struct AppHealth {
     /// Sempre `"ok"` enquanto o processo do app estiver vivo.
     pub status: String,
-    /// Versão do domínio (`firebird-domain`) no formato `major.minor.patch`.
+    /// Versão real do crate de domínio (`firebird_domain::VERSION`).
     pub domain_version: String,
 }
 
 /// Saúde do aplicativo: prova de ponta a ponta UI → Tauri → domínio.
 ///
-/// A versão é derivada de `ServerVersion::parse(env!("CARGO_PKG_VERSION"))`.
-/// **Escolha documentada:** `env!` é avaliado neste crate
-/// (`firebird-studio-desktop`), cujo `version` no `Cargo.toml` do workspace é
-/// mantido em sincronia com `firebird-domain` (ambos `0.1.0`) — a Fase 0 não
-/// altera crates de domínio para expor uma constante de versão, por aderência
-/// ao escopo de arquivos da tarefa. O parse via `ServerVersion` (e não o texto
-/// cru) garante que só uma versão semântica válida chegue à UI.
+/// A versão exibida vem de [`firebird_domain::VERSION`] — a constante do
+/// próprio crate de domínio —, e **não** de `env!("CARGO_PKG_VERSION")`, que
+/// leria a versão do crate desktop e poderia divergir silenciosamente.
+/// [`firebird_domain`] garante que a constante é semântica (teste em
+/// `firebird_domain`).
 ///
-/// A função é privada de propósito: `#[tauri::command]` em um `pub fn`
-/// declarado na **raiz** do crate emite `#[macro_export]` para `__cmd__…`,
-/// que colidiria com o `macro_rules!` local (E0255). Como o
-/// `generate_handler!` está no mesmo módulo, a visibilidade privada basta.
+/// A função é privada: o comando só precisa existir no módulo onde o
+/// `generate_handler!` é montado.
 #[tauri::command]
 fn app_health() -> AppHealth {
-    let versao = ServerVersion::parse(env!("CARGO_PKG_VERSION"))
-        .expect("a versão do crate deve ser semântica (major.minor[.patch])");
-
-    let domain_version = match versao.patch {
-        Some(patch) => format!("{}.{}.{}", versao.major, versao.minor, patch),
-        None => format!("{}.{}", versao.major, versao.minor),
-    };
-
     AppHealth {
         status: "ok".to_string(),
-        domain_version,
+        domain_version: DOMAIN_VERSION.to_string(),
     }
 }
 
@@ -60,35 +48,53 @@ mod tests {
     use super::*;
 
     #[test]
-    fn app_health_reporta_ok_e_versao_semantica_do_crate() {
+    fn app_health_reporta_ok_e_a_versao_real_do_crate_de_dominio() {
         let health = app_health();
 
         assert_eq!(health.status, "ok");
-        // A versão entregue é sempre `major.minor[.patch]`, derivada do
-        // `CARGO_PKG_VERSION` deste crate — nunca o texto cru.
-        let esperada = ServerVersion::parse(env!("CARGO_PKG_VERSION"))
-            .map(|v| match v.patch {
-                Some(patch) => format!("{}.{}.{}", v.major, v.minor, patch),
-                None => format!("{}.{}", v.major, v.minor),
-            })
-            .expect("versão do crate é semântica");
-        assert_eq!(health.domain_version, esperada);
-        assert!(
-            ServerVersion::parse(&health.domain_version).is_some(),
-            "domain_version deve continuar parseável pelo domínio"
+        assert_eq!(
+            health.domain_version, DOMAIN_VERSION,
+            "domain_version deve ser a versão do crate firebird-domain"
         );
+        // Guarda contra o modo de falha anterior: um wrapper local que copiasse
+        // a versão do próprio crate desktop continuaria verde se ambos
+        // divergissem — a constante do domínio é a única fonte de verdade.
+        assert_eq!(health.domain_version, firebird_domain::VERSION);
     }
 
     #[test]
-    fn capabilities_nao_concedem_permissoes_alem_de_core_default() {
-        // O arquivo `capabilities/default.json` é lido em runtime pelo Tauri;
-        // esta é uma trava de regressão documental: se alguém adicionar
-        // permissão extra (fs/shell), este teste falha até ser atualizado
-        // junto da revisão de segurança (Spec 11 §1).
-        let conteudo = include_str!("../capabilities/default.json");
+    fn nenhuma_capability_concede_permissao_alem_de_core_default() {
+        // Trava de segurança sobre **todos** os arquivos de capabilities: um
+        // `capabilities/extra.json` com `fs:`/`shell:` também reprovaria.
+        // (Regra: Spec 11 §1 — escopos mínimos, sem shell/fsystem genérico.)
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities");
+        let arquivos: Vec<_> = std::fs::read_dir(&dir)
+            .expect("diretório capabilities legível")
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|ext| ext == "json"))
+            .collect();
 
-        assert!(conteudo.contains(r#""permissions": ["core:default"]"#));
-        assert!(!conteudo.contains("fs:"));
-        assert!(!conteudo.contains("shell:"));
+        assert!(
+            !arquivos.is_empty(),
+            "esperado ao menos um arquivo de capability em {}",
+            dir.display()
+        );
+
+        for arquivo in arquivos {
+            let conteudo = std::fs::read_to_string(&arquivo)
+                .unwrap_or_else(|e| panic!("falha ao ler {}: {e}", arquivo.display()));
+            let nome = arquivo.display().to_string();
+            assert!(
+                conteudo.contains("core:default"),
+                "{nome}: deveria manter core:default"
+            );
+            for proibida in ["fs:", "shell:", "process:", "http:"] {
+                assert!(
+                    !conteudo.contains(proibida),
+                    "{nome}: permissão não permitida `{proibida}` (Spec 11 §1)"
+                );
+            }
+        }
     }
 }
