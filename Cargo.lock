@@ -345,6 +345,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "integration-firebird"
+version = "0.1.0"
+dependencies = [
+ "firebird-adapter",
+ "firebird-domain",
+]
+
+[[package]]
 name = "js-sys"
 version = "0.3.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"

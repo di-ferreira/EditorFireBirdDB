@@ -1,0 +1,11 @@
+[package]
+name = "integration-firebird"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Checklist de integração por versão do Firebird (Fase 0 — PoC, Task 4): roda contra servidor real quando as env vars FB_POC_* estão definidas; sem elas, os testes são ignorados e nunca falham o `cargo test` local."
+
+[dependencies]
+firebird-domain = { path = "../../crates/firebird-domain" }
+firebird-adapter = { path = "../../crates/firebird-adapter" }

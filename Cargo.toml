@@ -3,7 +3,7 @@
 # adicionado aos members na Fase 0/1.
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = ["crates/*", "tests/integration-firebird"]
 
 # Perfil do workspace: otimizações de release para o binário desktop.
 [profile.release]
