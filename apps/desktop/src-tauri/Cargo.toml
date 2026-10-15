@@ -19,8 +19,16 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 firebird-domain = { path = "../../../crates/firebird-domain" }
+firebird-adapter = { path = "../../../crates/firebird-adapter" }
+firebird-storage = { path = "../../../crates/firebird-storage" }
+firebird-security = { path = "../../../crates/firebird-security" }
+# `thiserror` só para os enums de erro da camada de aplicação.
+thiserror = "2"
 
 [dev-dependencies]
 # Usado apenas nos testes: validação de que as capabilities concedem
-# exatamente `core:default` (ver src/lib.rs).
+# exatamente `core:default` (ver src/lib.rs) e asserções de contrato dos DTOs.
 serde_json = "1"
+# `in-memory` expõe o cofre de teste: os testes de conexão rodam sem tocar o
+# cofre do sistema operacional (e sem senha real).
+firebird-security = { path = "../../../crates/firebird-security", features = ["in-memory"] }

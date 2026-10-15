@@ -1207,11 +1207,15 @@ dependencies = [
 name = "firebird-studio-desktop"
 version = "0.1.0"
 dependencies = [
+ "firebird-adapter",
  "firebird-domain",
+ "firebird-security",
+ "firebird-storage",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

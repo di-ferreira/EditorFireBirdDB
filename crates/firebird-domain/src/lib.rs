@@ -4,6 +4,7 @@
 //! `thiserror` para erros tipados. Ver [`ServerVersion`], [`DomainError`] e
 //! os modelos de metadados em [`metadata`].
 
+pub mod connection;
 pub mod error;
 pub mod metadata;
 pub mod version;
@@ -15,7 +16,11 @@ pub mod version;
 /// versão de si mesmo).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub use error::DomainError;
+pub use connection::{
+    ConnectionProfile, ConnectionStatus, DadosPerfil, PersistedProfile, ProfileError, SqlDialect,
+    TIMEOUT_MAXIMO_MS, TIMEOUT_PADRAO_MS,
+};
+pub use error::{redigir_segredo, DomainError};
 pub use metadata::{FieldInfo, RelationKind, RelationSummary};
 pub use version::ServerVersion;
 

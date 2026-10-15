@@ -6,7 +6,33 @@
 //! diretamente pela UI. As permissões da webview ficam em
 //! `capabilities/default.json` (apenas `core:default`).
 
+pub mod application;
+pub mod commands;
+pub mod security;
+pub mod storage;
+
+use application::estado::AppState;
+use commands::{
+    connection_close, connection_get_status, connection_list_profiles, connection_open,
+    connection_save_profile, connection_test_profile,
+};
 use firebird_domain::VERSION as DOMAIN_VERSION;
+use tauri::Manager;
+
+/// Nomes dos comandos de conexão registrados no `invoke_handler`.
+///
+/// **Atualize esta lista junto com o [`tauri::generate_handler!`]**: ela
+/// existe para que o teste de contrato com a UI
+/// (`apps/desktop/src/features/connections/api.ts`) detecte comando
+/// registrado com nome divergente do que o frontend invoca.
+pub const NOMES_DOS_COMANDOS_DE_CONEXAO: [&str; 6] = [
+    "connection_list_profiles",
+    "connection_save_profile",
+    "connection_test_profile",
+    "connection_open",
+    "connection_close",
+    "connection_get_status",
+];
 
 /// Resposta do comando [`app_health`], serializada para a UI.
 #[derive(Debug, serde::Serialize)]
@@ -35,10 +61,31 @@ fn app_health() -> AppHealth {
     }
 }
 
-/// Inicializa o Tauri: janela, capabilities e comandos registrados.
+/// Inicializa o Tauri: janela, capabilities, estado e comandos registrados.
+///
+/// O estado (armazenamento local + cofre + gerenciador de sessões) é montado
+/// no `setup` e degrada com mensagem acionável quando algum deles não abre —
+/// sem `panic!` no startup (Spec 03 §2).
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![app_health])
+        .setup(|app| {
+            let caminho = app.path().app_data_dir().ok();
+            let estado = AppState::montar(caminho.as_deref());
+            for aviso in estado.avisos() {
+                eprintln!("[firebird-studio] {aviso}");
+            }
+            app.manage(estado);
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            app_health,
+            connection_list_profiles,
+            connection_save_profile,
+            connection_test_profile,
+            connection_open,
+            connection_close,
+            connection_get_status
+        ])
         .run(tauri::generate_context!())
         .expect("falha ao iniciar o Firebird Studio Linux");
 }

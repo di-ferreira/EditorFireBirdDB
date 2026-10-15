@@ -46,6 +46,15 @@ impl DomainError {
     }
 }
 
+/// Redige segredos de um **texto livre** que não vem de um [`DomainError`].
+///
+/// Reaproveitada pela camada de aplicação ao montar mensagens de erro que
+/// combinam texto do driver com contexto (host, id do perfil): o valor de
+/// `password=`, `passwd=`, `pwd=` e `token=` vira `***` (FR-016).
+pub fn redigir_segredo(texto: &str) -> String {
+    redact_secrets(texto)
+}
+
 /// Chaves cujo valor deve ser redigido (FR-016).
 const SECRET_KEYS: [&str; 4] = ["password=", "passwd=", "pwd=", "token="];
 
@@ -89,7 +98,30 @@ fn secret_key_len_at(bytes: &[u8], i: usize) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::DomainError;
+    use super::{redigir_segredo, DomainError};
+
+    #[test]
+    fn redigir_segredo_trata_texto_livre_da_aplicacao() {
+        let texto = redigir_segredo("conexão com host=h password=S3nh4! falhou");
+        assert!(!texto.contains("S3nh4!"), "vazou: {texto}");
+        assert!(texto.contains("password=***"), "{texto}");
+        assert!(
+            texto.contains("host=h"),
+            "contexto não sensível deve sobreviver: {texto}"
+        );
+    }
+
+    #[test]
+    fn redigir_segredo_preserva_unicode_e_aspas() {
+        let texto = redigir_segredo("usuário 'Ação' pwd=Abc@123 — falhou");
+        assert!(texto.contains("Ação"), "{texto}");
+        assert!(!texto.contains("Abc@123"), "{texto}");
+    }
+
+    #[test]
+    fn redigir_segredo_de_texto_sem_segredo_devolve_o_texto() {
+        assert_eq!(redigir_segredo("nada a redigir"), "nada a redigir");
+    }
 
     #[test]
     fn redacted_remove_senha_de_mensagem_do_driver() {

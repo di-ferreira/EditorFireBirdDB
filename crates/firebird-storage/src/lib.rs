@@ -139,8 +139,10 @@ const SEGUNDOS_POR_DIA: u64 = 86_400;
 /// Instante atual em UTC, no formato `2026-10-15T12:34:56Z`.
 ///
 /// Único ponto de geração de timestamp do crate: todo `created_at`,
-/// `updated_at` e `executed_at` gravado sai daqui.
-pub(crate) fn agora_iso8601() -> String {
+/// `updated_at` e `executed_at` gravado sai daqui. É público para que a
+/// camada de aplicação (que monta os registros) carimbe `created_at`/
+/// `updated_at` com o mesmo formato, sem duplicar a conversão civil.
+pub fn agora_iso8601() -> String {
     let segundos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())

@@ -8,6 +8,31 @@ Baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
 
 ### Adicionado
 
+- **Fase 1 — Fundação**:
+  - `crates/firebird-storage`: SQLite (`rusqlite` bundled), migração
+    `0001_inicial.sql` com as 7 tabelas da Spec 09 (sem coluna de senha — apenas
+    `secret_ref`), e repositórios de perfis de conexão, histórico de consultas e
+    scripts salvos com SQL parametrizado.
+  - `crates/firebird-security`: `SecretStore` sobre o cofre do sistema (Secret
+    Service via `keyring` 4.2) + implementação em memória para testes;
+    `secret_ref` determinístico e redação de segredo em `Debug`/`Display`.
+  - Domínio de conexão (`crates/firebird-domain/src/connection.rs`):
+    `ConnectionProfile`, `SqlDialect`, `ConnectionStatus` e o ciclo de vida de sessão.
+  - `ConnectionManager` com injeção de dependência (`SecretStore` + `Connector`),
+    testável sem servidor Firebird.
+  - Seis comandos Tauri da Spec 03/10 — `connection_list_profiles`,
+    `connection_save_profile`, `connection_test_profile`, `connection_open`,
+    `connection_close`, `connection_get_status` — com DTOs `camelCase`, erros
+    tipados `{ code, message }` e **nenhum campo de senha** em DTO.
+  - UI de conexões (`apps/desktop/src/features/connections/`): listar, criar, editar,
+    testar, conectar e desconectar, com estados de loading/vazio/erro/sucesso, em
+    pt-BR e acessível por teclado; abas "Saúde" e "Conexões".
+  - Pipeline CI (`.github/workflows/ci.yml`): fmt, clippy `-D warnings`,
+    `cargo test --locked --workspace`, build do frontend e matriz de integração
+    Firebird 2.5/3.0/4.0/5.0 com espera de healthcheck e extração da lib cliente do
+    próprio container; Dependabot para cargo e npm.
+  - Plano da Fase 1 em `docs/plans/2026-10-15-fase1-fundacao.md` e backlog herdado
+    da Fase 0 em `docs/plans/2026-10-15-backlog-fase1-heranca-da-fase0.md`.
 - Estrutura inicial do repositório (monorepo pnpm + workspace Cargo Rust).
 - Especificação técnica extraída por tema em `docs/specs/` (17 documentos, do documento
   original v0.1 preservado em `docs/original/`).
@@ -43,5 +68,18 @@ Baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
   matriz PoC, riscos restantes (bug de classificação de statement/`RETURNING`, lib
   3.0.11 não testada, 2.0/2.1 sem ambiente, libs do host ilegíveis) e pendências da
   Fase 1 documentados no ADR.
+- Harness de integração: o setup passou a **recusar** criar/derrubar `CLIENTES` e
+  `V_CLIENTES` que já existam no banco de destino (o harness pode ser apontado para um
+  banco não descartável); regra coberta por testes unitários sem servidor.
+- `firebird_domain` expõe `VERSION` (versão real do crate de domínio, consumida pelo
+  comando `app_health`) e um utilitário de redação de segredo reutilizável.
+
+### Limitações conhecidas
+
+- `connectTimeoutMs` é persistido no perfil mas ainda **não aplicado** à conexão
+  (`ConnParams` não transporta timeout) — a aplicar.
+- `reconectar()` existe no `ConnectionManager` mas ainda não é exposto por comando.
+- `UnsupportedServerFeature`, `QueryError` e `ProviderError` estão no enum de erros da
+  fronteira, sem produtor até a Fase 2/3.
 
 [Não lançado]: https://github.com/di-ferreira/EditorFireBirdDB
