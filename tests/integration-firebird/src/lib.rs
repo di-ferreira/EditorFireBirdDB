@@ -39,7 +39,8 @@ pub fn recusa_se_schema_pre_existe(relacoes: &[RelationSummary]) -> Option<Strin
 
     Some(format!(
         "{} já {} no banco de destino; recusa criar ou derrubar schema que não é \
-         desta execução",
+         desta execução. Se for resíduo de uma execução anterior do harness, remova \
+         manualmente (DROP VIEW V_CLIENTES; DROP TABLE CLIENTES;) e rode de novo.",
         conflitos.join("/"),
         if conflitos.len() == 1 {
             "existe"
@@ -113,12 +114,15 @@ mod tests {
     }
 
     #[test]
-    fn view_sintetica_pre_existente_tambem_e_recusada() {
+    fn objeto_sintetico_e_recusado_pelo_nome_mesmo_com_kind_diferente() {
         let recusa =
             recusa_se_schema_pre_existe(&[relacao("V_CLIENTES")]).expect("deveria recusar");
 
         assert!(recusa.contains("V_CLIENTES"));
         assert!(recusa.contains("existe"));
+        // A mensagem precisa orientar a remediação: sem server_version/pré-checagem
+        // quebrada, o operador ficaria sem caminho para destravar o harness.
+        assert!(recusa.contains("DROP TABLE CLIENTES"), "{recusa}");
     }
 
     #[test]
