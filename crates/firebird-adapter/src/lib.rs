@@ -3,13 +3,19 @@
 //! Este crate isola o driver escolhido atrás do trait [`FirebirdAdapter`]
 //! (ADR-002), com descoberta e validação de arquitetura da `libfbclient.so`
 //! ([`ClientLibrary`]) e parâmetros de conexão cujo `Debug`/`Display` nunca
-//! vazam a senha ([`ConnParams`], FR-016).
+//! vazam a senha ([`ConnParams`], FR-016). O catálogo `RDB$` é lido pelo
+//! [`MetadataRepository`] com variantes por versão do servidor, e os testes
+//! usam o adapter falso [`FakeAdapter`] (público de propósito, sem rede).
 
 pub mod adapter;
+pub mod fake;
 pub mod library;
+pub mod metadata;
 
 pub use adapter::{ConnParams, FirebirdAdapter, RsFbClientAdapter};
+pub use fake::FakeAdapter;
 pub use library::ClientLibrary;
+pub use metadata::MetadataRepository;
 
 use firebird_domain::DomainError;
 
