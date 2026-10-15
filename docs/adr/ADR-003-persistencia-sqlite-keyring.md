@@ -1,6 +1,6 @@
 # ADR-003: Persistência SQLite e keyring do sistema
 
-**Status:** Proposta
+**Status:** Decidida — implementada na Fase 1 (`crates/firebird-storage`, `crates/firebird-security`)
 **Data:** 14/10/2026
 **Contexto:** [Spec 09 — Modelo de dados local](../specs/09-modelo-dados-local.md)
 

@@ -6,8 +6,10 @@
 [![Plataforma](https://img.shields.io/badge/plataforma-Linux%20x86__64-orange.svg)](docs/specs/01-compatibilidade-firebird.md)
 [![Firebird](https://img.shields.io/badge/Firebird-2.0%20%E2%80%93%205.0-green.svg)](docs/compatibility/)
 
-> **Status:** Fase 0 — prova de conceito técnica. A compatibilidade com Firebird 2.0/2.1
-> no Linux moderno ainda está sendo validada; nenhuma versão é declarada "suportada" sem
+> **Status:** Fase 1 (fundação) concluída — prova de conceito validada e a base do produto
+> entregue: CI, persistência SQLite, cofre de segredos, gerenciador de conexões e a UI de
+> conexões. Firebird **2.5.9, 3.0.10, 4.0.0 e 5.0.0** foram validados no checklist PoC
+> (6/6 cada); **2.0/2.1 seguem não testados** — nenhuma versão é declarada "suportada" sem
 > evidência de teste reproduzível.
 
 ## Proposta
@@ -53,6 +55,8 @@ apps/desktop/src/         → React + TypeScript (features: connections, db-expl
                             sql-editor, query-results, ai-assistant, settings)
 apps/desktop/src-tauri/   → Rust (domain, application, firebird, metadata, query,
                             ai, storage, security, logging, commands)
+crates/firebird-storage/  → SQLite local (perfis, histórico, scripts) + migrações
+crates/firebird-security/ → cofre de segredos do sistema (Secret Service)
 docs/specs/               → especificação técnica quebrada por tema (fonte de verdade)
 docs/adr/                 → decisões de arquitetura
 tests/                    → integração Firebird por versão, E2E e fixtures sintéticas

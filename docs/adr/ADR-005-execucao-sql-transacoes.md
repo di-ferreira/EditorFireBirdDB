@@ -1,6 +1,6 @@
 # ADR-005: Execução de SQL, transações, cancelamento e políticas de escrita
 
-**Status:** Proposta
+**Status:** Parcialmente implementada (Fase 1: leitura/escrita separadas via `query_rows`/`execute`; cancelamento e confirmação de escrita chegam na Fase 2)
 **Data:** 14/10/2026
 **Contexto:** [Spec 05 — SQL Editor](../specs/05-sql-editor.md),
 [Spec 06 — Grade de resultados](../specs/06-grade-resultados.md)
