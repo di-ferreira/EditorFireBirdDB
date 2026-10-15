@@ -43,3 +43,6 @@ secrets.json
 *.log
 coverage/
 lcov.info
+
+# Workspace temporario do SDD (briefs/reports/reviews por plano)
+.superpowers/
