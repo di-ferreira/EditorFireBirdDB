@@ -1,9 +1,9 @@
 # Workspace Cargo raiz do Firebird Studio Linux.
-# O crate do backend desktop (Tauri) ficará em apps/desktop/src-tauri e será
-# adicionado aos members na Fase 0/1.
+# O crate do backend desktop (Tauri 2) vive em apps/desktop/src-tauri e
+# integra o workspace desde a Fase 0.
 [workspace]
 resolver = "2"
-members = ["crates/*", "tests/integration-firebird"]
+members = ["crates/*", "tests/integration-firebird", "apps/desktop/src-tauri"]
 
 # Perfil do workspace: otimizações de release para o binário desktop.
 [profile.release]

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permissões mínimas do Firebird Studio Linux: apenas core:default — nenhuma permissão extra de filesystem ou shell (Spec 02, Spec 11 §1).",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
