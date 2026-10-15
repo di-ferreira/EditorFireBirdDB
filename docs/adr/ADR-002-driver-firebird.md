@@ -85,6 +85,14 @@ Evidências cruzadas: logs do spike (`/tmp/opencode/task5-logs/`) e do harness
       statement, liberando `INSERT ... RETURNING`/`EXECUTE BLOCK` com testes por versão.
 - [ ] Ambiente reproduzível de **2.0 e 2.1** (VM/container) e execução do checklist
       nelas — sem isso, permanecem "não testadas".
+- [ ] **Decidir o compromisso para 2.0** (saída obrigatória da Fase 0, Spec 14): se 2.0
+      não funcionar nas condições Linux-alvo, escolher explicitamente entre conexão
+      remota, sistema suportado específico ou imagem compatível — e registrar a decisão.
+- [ ] **Avaliar a segunda estratégia de driver** (Spec 01, §3): a Fase 0 exercitou só a
+      `libfbclient` via `DynLoad.lib_path`; a alternativa (`pure_rust`/`rsfbclient-rust`
+      do mesmo crate) ainda não foi comparada. Registrar o resultado comparativo.
+- [ ] **Exercitar dialeto 1 × 3 e charset ≠ UTF8** por conexão (Spec 14, Fase 0; hoje só
+      UTF8 padrão foi validado).
 - [ ] Exercitar a lib **3.0.11** (e política de `FB_POC_LIB_PATH` para CI).
 - [ ] Matriz de homologação da Spec 01, §2 em CI por versão (ambientes isolados).
 - [ ] Política de diagnóstico: exibir caminho + versão da biblioteca carregada e

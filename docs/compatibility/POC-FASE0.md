@@ -28,7 +28,7 @@ firebird-spike --host <H> --port <P> --database <D> --user <U> --lib <caminho> [
 - A senha é lida **exclusivamente** da variável de ambiente `FB_PASSWORD` — não
   existe flag de senha, `--help` não a mostra, `--password`/`--senha` são rejeitados
   com erro acionável e o `Debug` da struct de argumentos sai redigido como `***`
-  (FR-016; 13 testes unitários cobrem isso).
+  (FR-016; 4 testes unitários do spike verificam a redação, entre 13 do crate).
 - `--lib` aponta a `libfbclient.so` exata a carregar (seleção manual, Spec 01, §3);
   antes de conectar, o spike valida o cabeçalho ELF e a arquitetura da biblioteca.
 - A saída é um bloco por combinação: cabeçalho (versão do servidor, biblioteca com

@@ -46,3 +46,6 @@ lcov.info
 
 # Workspace temporario do SDD (briefs/reports/reviews por plano)
 .superpowers/
+
+# Skills de terceiros instaladas no ambiente (nao fazem parte do produto)
+.agents/

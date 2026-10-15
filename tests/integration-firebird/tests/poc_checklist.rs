@@ -164,8 +164,8 @@ fn executar_checklist(amb: &Ambiente) -> Vec<String> {
         }
     };
 
-    // ---------- Setup: schema sintético ----------
-    if !criar_schema_sintetico(&mut adapter, &mut falhas) {
+    // ---------- Setup: schema sintético (pré-checagem antes de qualquer DDL) ----------
+    if !criar_schema_sintetico(&mut adapter, versao.as_ref(), &mut falhas) {
         return falhas;
     }
 
@@ -266,11 +266,29 @@ fn executar_checklist(amb: &Ambiente) -> Vec<String> {
 /// obrigatório enquanto o bug de classificação do rsfbclient 0.29 nativo
 /// existir (ver [`firebird_adapter::FirebirdAdapter::execute`]). Retorna
 /// `false` quando o setup falhou (checklist não pode continuar sem a tabela).
-fn criar_schema_sintetico(adapter: &mut RsFbClientAdapter, falhas: &mut Vec<String>) -> bool {
-    // Drops de tentativa anterior (banco descartável; erro aqui é esperado se
-    // não existe — por isso melhor esforço, sem registro como falha).
-    let _ = adapter.execute("DROP VIEW V_CLIENTES", &[]);
-    let _ = adapter.execute("DROP TABLE CLIENTES", &[]);
+///
+/// **Pré-checagem obrigatória:** se `CLIENTES`/`V_CLIENTES` já existirem no
+/// banco de destino, o teste **recusa** criar ou derrubar — este harness pode
+/// ser apontado para um banco que não é descartável (o plano da Task 4 previa
+/// uso do servidor local), e um `DROP` cego destruiria dados alheios. A regra
+/// mora em [`integration_firebird::pre_checagem`], coberta por testes unitários
+/// (sem servidor) — aqui só consumimos o veredito.
+fn criar_schema_sintetico(
+    adapter: &mut RsFbClientAdapter,
+    versao: Option<&ServerVersion>,
+    falhas: &mut Vec<String>,
+) -> bool {
+    match integration_firebird::pre_checagem(adapter, versao) {
+        Ok(Some(recusa)) => {
+            falhas.push(format!("setup: {recusa}"));
+            return false;
+        }
+        Ok(None) => {}
+        Err(erro) => {
+            falhas.push(format!("setup: pré-checagem de schema falhou: {erro:?}"));
+            return false;
+        }
+    }
 
     let ddl_tabela = "CREATE TABLE CLIENTES (\
         ID INTEGER NOT NULL PRIMARY KEY, \

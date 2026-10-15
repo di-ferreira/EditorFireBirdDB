@@ -44,4 +44,4 @@ Baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
   3.0.11 não testada, 2.0/2.1 sem ambiente, libs do host ilegíveis) e pendências da
   Fase 1 documentados no ADR.
 
-[Não lançado]: https://github.com/firebird-studio-linux/firebird-studio-linux
+[Não lançado]: https://github.com/di-ferreira/EditorFireBirdDB

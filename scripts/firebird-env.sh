@@ -98,7 +98,12 @@ Ambiente ${tag} de pé. Para rodar o checklist de integração:
   export FB_POC_DATABASE=${DATABASE_SERVIDOR}
   export FB_POC_USER=SYSDBA
   export FB_POC_PASSWORD=$(senha)
-  export FB_POC_LIB_PATH=/usr/lib/libfbclient.so.<versao-da-lib>
+  # A lib do host em /usr/lib/libfbclient* e symlink para /opt/firebird/lib e
+  # pode estar ilegivel (permissao). A workaround usada na Fase 0 e extrair a
+  # lib da propria imagem para target/firebird-libs/<versao>/ (ver secao 8 do
+  # docs/compatibility/POC-FASE0.md). Se a lib do host estiver legivel, aponte
+  # direto para ela (ex.: /usr/lib/libfbclient.so.3.0.11).
+  export FB_POC_LIB_PATH=<caminho-da-libfbclient-legivel>
   cargo test -p integration-firebird -- --nocapture
 FIM
 }
