@@ -93,11 +93,18 @@ const SQL_RELATIONS_FALLBACK: &str = "SELECT RDB$RELATION_NAME, RDB$VIEW_TYPE \
      ORDER BY RDB$RELATION_NAME";
 
 /// Colunas de [`SQL_RELATION_FIELDS`], na ordem do `SELECT`.
+///
+/// `RDB$FIELD_SOURCE` (e não `RDB$FIELDS.RDB$DOMAIN_NAME`) é a fonte do
+/// domínio: `RDB$DOMAIN_NAME` **não existe** em `RDB$FIELDS` no Firebird
+/// 2.5.9 nem 3.0.10 (evidência da Task 4: erro -204/-206 "Column unknown
+/// F.RDB$DOMAIN_NAME" nos servidores reais). `RDB$FIELD_SOURCE` existe desde
+/// 2.0 e nomeia o domínio do campo — explícito (`CREATE TABLE t (x DOMINIO)`)
+/// ou interno (`RDB$NNN`) gerado para coluna com tipo inline.
 const SQL_RELATION_FIELDS: &str =
     "SELECT RF.RDB$FIELD_NAME, F.RDB$FIELD_TYPE, F.RDB$FIELD_SUB_TYPE, \
      RF.RDB$NULL_FLAG, F.RDB$NULL_FLAG, \
      RF.RDB$DEFAULT_SOURCE, F.RDB$DEFAULT_SOURCE, \
-     F.RDB$DOMAIN_NAME, RF.RDB$FIELD_POSITION \
+     RF.RDB$FIELD_SOURCE, RF.RDB$FIELD_POSITION \
      FROM RDB$RELATION_FIELDS RF \
      JOIN RDB$FIELDS F ON F.RDB$FIELD_NAME = RF.RDB$FIELD_SOURCE \
      WHERE RF.RDB$RELATION_NAME = '{}' \
@@ -402,7 +409,7 @@ mod tests {
             None,                                         // F.RDB$NULL_FLAG
             None,                                         // RF.RDB$DEFAULT_SOURCE
             None,                                         // F.RDB$DEFAULT_SOURCE
-            None,                                         // F.RDB$DOMAIN_NAME
+            None,                                         // RF.RDB$FIELD_SOURCE (domínio)
             Some("0".to_string()),                        // RF.RDB$FIELD_POSITION
         ];
         let mut fake = FakeAdapter::new(vec![("RDB$RELATION_FIELDS", vec![linha])]);
@@ -450,7 +457,7 @@ mod tests {
             None,                  // F.RDB$NULL_FLAG
             Some("DEFAULT 0                           ".to_string()), // RF.RDB$DEFAULT_SOURCE
             None,                  // F.RDB$DEFAULT_SOURCE
-            Some("DINHEIRO               ".to_string()), // F.RDB$DOMAIN_NAME
+            Some("DINHEIRO               ".to_string()), // RF.RDB$FIELD_SOURCE (domínio)
             Some("3".to_string()), // RF.RDB$FIELD_POSITION
         ];
         let mut fake = FakeAdapter::new(vec![("RDB$RELATION_FIELDS", vec![linha])]);

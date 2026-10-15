@@ -75,6 +75,30 @@ pub trait FirebirdAdapter {
     /// Executa `sql` e devolve as linhas como texto (colunas na ordem do
     /// `SELECT`; [`None`] para NULL).
     fn query_rows(&mut self, sql: &str) -> Result<Vec<Vec<Option<String>>>, DomainError>;
+
+    /// Executa `sql` com parâmetros posicionais `?` e devolve as linhas como
+    /// texto ([`None`] para NULL no resultado).
+    ///
+    /// Cada parâmetro é texto ([`Some`]) ou NULL ([`None`]); a conversão para
+    /// o tipo da coluna é do servidor (parametrização real, sem concatenação
+    /// de string — fechamento de injeção na Fase 1).
+    fn query_rows_params(
+        &mut self,
+        sql: &str,
+        params: &[Option<&str>],
+    ) -> Result<Vec<Vec<Option<String>>>, DomainError>;
+
+    /// Executa `sql` (DML/DDL, sem cursor de saída) e devolve o número de
+    /// linhas afetadas ([`None`]/0 quando o servidor não informa).
+    ///
+    /// Existe por necessidade do harness de integração (Task 4): o
+    /// `rsfbclient` 0.29 (backend nativo) classifica **todo** statement como
+    /// SELECT — o parse de `isc_info_sql_stmt_type` lê o terminator
+    /// `isc_info_end` (= 1) como tipo — e então tenta `isc_dsql_fetch` após
+    /// DDL/DML; com o cliente 2.5 isso é SIGSEGV e com 3.0+ vira o erro
+    /// `-504 (Cursor is not open)`. `Execute::execute` do rsfbclient não faz
+    /// fetch e contorna o bug; evidência (backtrace) no relatório da Task 4.
+    fn execute(&mut self, sql: &str, params: &[Option<&str>]) -> Result<usize, DomainError>;
 }
 
 /// Adapter concreto sobre o `rsfbclient` nativo com carregamento dinâmico da
@@ -130,19 +154,55 @@ impl FirebirdAdapter for RsFbClientAdapter {
     }
 
     fn query_rows(&mut self, sql: &str) -> Result<Vec<Vec<Option<String>>>, DomainError> {
+        self.query_rows_params(sql, &[])
+    }
+
+    fn query_rows_params(
+        &mut self,
+        sql: &str,
+        params: &[Option<&str>],
+    ) -> Result<Vec<Vec<Option<String>>>, DomainError> {
         let rows: Vec<Row> = self
             .conn
-            .query(sql, ())
+            .query(sql, params_em_rsfb(params))
             .map_err(|e| crate::erro_driver(format!("{e}")))?;
-        rows.into_iter()
-            .map(|row| {
-                (0..row.cols.len())
-                    .map(|i| row.get::<Option<String>>(i))
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .collect::<Result<Vec<_>, _>>()
+        linhas_como_texto(rows)
+    }
+
+    fn execute(&mut self, sql: &str, params: &[Option<&str>]) -> Result<usize, DomainError> {
+        // Caminho sem fetch (`Execute::execute`): obrigatório para DML/DDL
+        // enquanto o bug de classificação do rsfbclient 0.29 nativo existir
+        // (ver doc da trait).
+        use rsfbclient::Execute;
+        self.conn
+            .execute(sql, params_em_rsfb(params))
             .map_err(|e| crate::erro_driver(format!("{e}")))
     }
+}
+
+/// Converte parâmetros de domínio (`Some(texto)`/`None` = NULL) para o tipo
+/// do rsfbclient: `Text` (o driver envia como SQL_TEXT e o servidor converte
+/// para o tipo contextual da coluna/`?`) e `Null`.
+fn params_em_rsfb(params: &[Option<&str>]) -> Vec<rsfbclient::SqlType> {
+    params
+        .iter()
+        .map(|param| match param {
+            Some(texto) => rsfbclient::SqlType::Text((*texto).to_string()),
+            None => rsfbclient::SqlType::Null,
+        })
+        .collect()
+}
+
+/// Converte linhas brutas do rsfbclient em texto ([`None`] para NULL).
+fn linhas_como_texto(rows: Vec<Row>) -> Result<Vec<Vec<Option<String>>>, DomainError> {
+    rows.into_iter()
+        .map(|row| {
+            (0..row.cols.len())
+                .map(|i| row.get::<Option<String>>(i))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| crate::erro_driver(format!("{e}")))
 }
 
 #[cfg(test)]

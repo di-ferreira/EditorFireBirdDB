@@ -26,7 +26,10 @@ pub struct FieldInfo {
     pub name: String,
     /// Nome do tipo declarado (ex.: `INTEGER`, `VARCHAR`).
     pub type_name: String,
-    /// Domínio associado, quando a coluna usa um; ausente = [`None`].
+    /// Domínio da coluna (`RDB$FIELD_SOURCE`): explícito (`CREATE TABLE t
+    /// (x DOMINIO)`) ou interno (`RDB$NNN`) gerado para coluna com tipo
+    /// inline — `RDB$FIELDS.RDB$DOMAIN_NAME` não existe em 2.5/3.0
+    /// (evidência da Task 4); ausente = [`None`].
     pub domain: Option<String>,
     pub nullable: bool,
     /// Expressão default literal, quando existir; ausente = [`None`].

@@ -15,8 +15,12 @@ use crate::FirebirdAdapter;
 pub struct FakeAdapter {
     /// Regras `(marcador, linhas)`, na ordem de prioridade.
     regras: Vec<(String, Vec<Vec<Option<String>>>)>,
-    /// Todos os SQLs passados a [`FirebirdAdapter::query_rows`], em ordem.
+    /// Todos os SQLs passados a [`FirebirdAdapter::query_rows`] ou
+    /// [`FirebirdAdapter::query_rows_params`], em ordem.
     sqls_executados: Vec<String>,
+    /// Params de cada chamada parametrizada ([`FirebirdAdapter::query_rows_params`]
+    /// e [`FirebirdAdapter::execute`]), na mesma ordem das chamadas.
+    params_executados: Vec<Vec<Option<String>>>,
 }
 
 impl FakeAdapter {
@@ -30,13 +34,24 @@ impl FakeAdapter {
                 .map(|(marcador, linhas)| (marcador.to_string(), linhas))
                 .collect(),
             sqls_executados: Vec::new(),
+            params_executados: Vec::new(),
         }
     }
 
     /// SQLs executados até aqui, na ordem — para asserir qual variante de
     /// catálogo (`RDB$RELATION_TYPE` vs `RDB$VIEW_TYPE` etc.) foi usada.
+    /// Conta também os SQLs passados a
+    /// [`FirebirdAdapter::query_rows_params`].
     pub fn executed_sqls(&self) -> &[String] {
         &self.sqls_executados
+    }
+
+    /// Parâmetros posicionais de cada chamada parametrizada
+    /// ([`FirebirdAdapter::query_rows_params`] e [`FirebirdAdapter::execute`]),
+    /// na ordem das chamadas — para asserir que o parâmetro certo foi enviado
+    /// (ex.: `?` do SELECT).
+    pub fn executed_params(&self) -> &[Vec<Option<String>>] {
+        &self.params_executados
     }
 }
 
@@ -52,6 +67,39 @@ impl FirebirdAdapter for FakeAdapter {
 
     fn query_rows(&mut self, sql: &str) -> Result<Vec<Vec<Option<String>>>, DomainError> {
         self.sqls_executados.push(sql.to_string());
+        self.buscar_regra(sql)
+    }
+
+    fn query_rows_params(
+        &mut self,
+        sql: &str,
+        params: &[Option<&str>],
+    ) -> Result<Vec<Vec<Option<String>>>, DomainError> {
+        self.registrar_e_buscar(sql, params)
+    }
+
+    fn execute(&mut self, sql: &str, params: &[Option<&str>]) -> Result<usize, DomainError> {
+        // O fake não simula contagem de linhas afetadas: regra casa → Ok(0).
+        self.registrar_e_buscar(sql, params).map(|_| 0)
+    }
+}
+
+impl FakeAdapter {
+    /// Registra SQL e params e resolve o SQL contra as regras por marcador
+    /// (primeiro que casa).
+    fn registrar_e_buscar(
+        &mut self,
+        sql: &str,
+        params: &[Option<&str>],
+    ) -> Result<Vec<Vec<Option<String>>>, DomainError> {
+        self.sqls_executados.push(sql.to_string());
+        self.params_executados
+            .push(params.iter().map(|p| p.map(ToString::to_string)).collect());
+        self.buscar_regra(sql)
+    }
+
+    /// Resolve o SQL contra as regras por marcador (primeiro que casa).
+    fn buscar_regra(&mut self, sql: &str) -> Result<Vec<Vec<Option<String>>>, DomainError> {
         match self
             .regras
             .iter()
@@ -107,6 +155,90 @@ mod tests {
         let erro = fake
             .query_rows("SELECT 1")
             .expect_err("SQL sem regra deve falhar alto, não devolver vazio");
+
+        assert!(
+            matches!(erro, DomainError::Catalog { .. }),
+            "deve virar DomainError::Catalog: {erro:?}"
+        );
+    }
+
+    #[test]
+    fn query_rows_params_devolve_linhas_do_marcador_como_query_rows() {
+        let linhas = vec![vec![Some("O'BRIEN".to_string())]];
+        let mut fake = FakeAdapter::new(vec![("WHERE NOME =", linhas.clone())]);
+
+        let obtidas = fake
+            .query_rows_params(
+                "SELECT NOME FROM CLIENTES WHERE NOME = ?",
+                &[Some("O'BRIEN")],
+            )
+            .expect("marcador presente deve devolver as linhas");
+
+        assert_eq!(obtidas, linhas);
+        assert_eq!(
+            fake.executed_sqls().len(),
+            1,
+            "o SQL parametrizado deve ser registrado como executado"
+        );
+    }
+
+    #[test]
+    fn query_rows_params_registra_os_params_enviados() {
+        let mut fake = FakeAdapter::new(vec![("CLIENTES", vec![])]);
+
+        let _ = fake.query_rows_params(
+            "INSERT INTO CLIENTES (NOME, FLAG) VALUES (?, ?)",
+            &[Some("João"), None],
+        );
+
+        assert_eq!(
+            fake.executed_params(),
+            &[vec![Some("João".to_string()), None]],
+            "os params (com None = NULL) devem ficar registrados para asserção"
+        );
+    }
+
+    #[test]
+    fn query_rows_params_sem_regra_retorna_erro_de_catalogo() {
+        let mut fake = FakeAdapter::new(vec![]);
+
+        let erro = fake
+            .query_rows_params("SELECT 1 FROM RDB$DATABASE WHERE ? = ?", &[Some("a"), None])
+            .expect_err("SQL sem regra deve falhar alto, não devolver vazio");
+
+        assert!(
+            matches!(erro, DomainError::Catalog { .. }),
+            "deve virar DomainError::Catalog: {erro:?}"
+        );
+    }
+
+    #[test]
+    fn execute_registra_sql_e_params_e_devolve_ok_sem_linhas() {
+        let mut fake = FakeAdapter::new(vec![("INSERT INTO CLIENTES", vec![])]);
+
+        let afetadas = fake
+            .execute(
+                "INSERT INTO CLIENTES (NOME, FLAG) VALUES (?, ?)",
+                &[Some("João"), None],
+            )
+            .expect("regra presente deve devolver Ok");
+
+        assert_eq!(afetadas, 0, "o fake não simula contagem de linhas");
+        assert_eq!(fake.executed_sqls().len(), 1);
+        assert_eq!(
+            fake.executed_params(),
+            &[vec![Some("João".to_string()), None]],
+            "os params do execute devem ficar registrados"
+        );
+    }
+
+    #[test]
+    fn execute_sem_regra_retorna_erro_de_catalogo() {
+        let mut fake = FakeAdapter::new(vec![]);
+
+        let erro = fake
+            .execute("CREATE TABLE X (Y INTEGER)", &[])
+            .expect_err("SQL sem regra deve falhar alto");
 
         assert!(
             matches!(erro, DomainError::Catalog { .. }),
