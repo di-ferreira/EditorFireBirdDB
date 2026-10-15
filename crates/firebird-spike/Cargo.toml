@@ -1,0 +1,11 @@
+[package]
+name = "firebird-spike"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Binário do spike da Fase 0 (PoC): executa o checklist de compatibilidade contra um servidor Firebird com libfbclient escolhida e imprime o relatório por combinação (ADR-002)."
+
+[dependencies]
+firebird-domain = { path = "../firebird-domain" }
+firebird-adapter = { path = "../firebird-adapter" }

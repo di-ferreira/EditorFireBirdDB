@@ -162,6 +162,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "firebird-spike"
+version = "0.1.0"
+dependencies = [
+ "firebird-adapter",
+ "firebird-domain",
+]
+
+[[package]]
 name = "form_urlencoded"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
