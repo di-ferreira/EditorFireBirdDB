@@ -1,0 +1,11 @@
+[package]
+name = "firebird-storage"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Persistência local do Firebird Studio Linux: SQLite versionado por migrações e repositórios de perfis de conexão, histórico de consultas e scripts salvos (Spec 09)."
+
+[dependencies]
+# `bundled` compila o próprio SQLite: o app não depende de libsqlite do sistema.
+rusqlite = { version = "0.32", features = ["bundled"] }
+thiserror = "2"
