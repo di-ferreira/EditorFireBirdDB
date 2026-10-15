@@ -1,0 +1,17 @@
+{
+  "name": "firebird-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Firebird Studio Linux — monorepo (Tauri 2 + React + Rust).",
+  "type": "module",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "scripts": {
+    "dev": "pnpm --filter firebird-studio-desktop dev",
+    "build": "pnpm --filter firebird-studio-desktop build",
+    "preview": "pnpm --filter firebird-studio-desktop preview",
+    "typecheck": "pnpm --filter firebird-studio-desktop exec tsc --noEmit"
+  }
+}
