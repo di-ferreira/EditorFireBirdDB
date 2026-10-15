@@ -1,0 +1,333 @@
+# CI do Firebird Studio Linux (Fase 1 — Tarefa D).
+#
+# Três jobs independentes:
+#   * `rust`               — fmt + clippy (-D warnings) + `cargo test --workspace`;
+#   * `frontend`           — `pnpm install --frozen-lockfile` + build (tsc + vite);
+#   * `integration-firebird` — matriz por versão do servidor (Spec 12 §2).
+#
+# Regras transversais (Spec 11 §1, CONTRIBUTING):
+#   * `permissions: contents: read` — o CI nunca escreve no repositório;
+#   * nenhuma credencial real no arquivo: a senha abaixo é a do container
+#     descartável de teste (mesma do `scripts/firebird-env.sh`), nunca um
+#     servidor real (FR-016);
+#   * `concurrency` cancela runs antigos do mesmo ref para não gastar runner.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ------------------------------------------------------------------ rust ---
+  rust:
+    name: Rust (fmt + clippy + testes)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain estável (com rustfmt e clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache de compilação (registry + target)
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Dependências de sistema do Tauri 2 (só se faltarem)
+        # `cargo test --workspace` compila `apps/desktop/src-tauri`, cujo
+        # `tauri-build` exige os headers do WebKitGTK no Linux. As imagens do
+        # runner já trazem a maior parte; instalamos o que faltar conforme a
+        # lista oficial de pré-requisitos do Tauri 2 para Debian/Ubuntu.
+        run: |
+          set -euo pipefail
+          if pkg-config --exists webkit2gtk-4.1; then
+            echo "webkit2gtk-4.1 já presente na imagem do runner — nada a instalar."
+            exit 0
+          fi
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Formatação (cargo fmt --all --check)
+        run: cargo fmt --all --check
+
+      - name: Lint (clippy com -D warnings)
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Testes do workspace
+        # Sem `FB_POC_*` o checklist de integração se autoirroriza (ignora, não
+        # falha) — aqui ele é realmente exercitado pelo job da matriz abaixo.
+        run: cargo test --locked --workspace
+
+  # -------------------------------------------------------------- frontend ---
+  frontend:
+    name: Frontend (pnpm build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Definir a versão do pnpm
+        id: pnpm-version
+        # `pnpm/action-setup` exige `version` quando o repositório não declara
+        # `packageManager`; e rejeita as duas coisas juntas. Detectamos o campo
+        # na raiz para não fixar uma versão que brigue com o repositório.
+        run: |
+          set -euo pipefail
+          if grep -q '"packageManager"' package.json 2>/dev/null ||
+             grep -q '"devEngines"' package.json 2>/dev/null; then
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "::notice::packageManager declarado na raiz — a versão do pnpm vem do repositório."
+          else
+            echo "version=11" >> "$GITHUB_OUTPUT"
+            echo "::notice::sem packageManager na raiz — pnpm 11 fixado neste workflow."
+          fi
+
+      - name: pnpm (action-setup)
+        uses: pnpm/action-setup@v6
+        with:
+          version: ${{ steps.pnpm-version.outputs.version }}
+
+      - name: Node.js 22 (cache do store do pnpm)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Instalar dependências (lockfile congelado)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build do frontend (tsc --noEmit + vite build)
+        # Preferimos o script agregador da raiz (tarefa C da Fase 1); até ele
+        # existir, chamamos o script do app pelo filtro do workspace pnpm.
+        # `pnpm lint`/`pnpm test` entram aqui quando os scripts existirem
+        # (CONTRIBUTING pede lint e teste no CI).
+        run: |
+          set -euo pipefail
+          if [ -f package.json ] &&
+             node -e 'process.exit(require("./package.json").scripts?.build ? 0 : 1)'; then
+            echo "usando o script agregador da raiz (pnpm run build)"
+            pnpm run build
+          else
+            echo "sem script de build na raiz — usando o filtro do workspace"
+            pnpm --filter firebird-studio-desktop build
+          fi
+
+  # --------------------------------------------------- integration-firebird ---
+  integration-firebird:
+    name: Integração Firebird (${{ matrix.tag }})
+    # Só roda em push na `main` (ou disparo manual): a matriz sobe quatro
+    # containers e leva minutos. Em PR, `rust` + `frontend` dão o sinal rápido;
+    # a matriz completa continua disponível via `workflow_dispatch` e no push.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      # `fail-fast: false` de propósito: a matriz é relatório de homologação por
+      # versão (Spec 12 §2) — uma versão antiga quebrada não pode esconder o
+      # resultado das demais, e nenhuma versão é declarada suportada por uma
+      # execução só.
+      fail-fast: false
+      matrix:
+        # Tags já usadas por `scripts/firebird-env.sh` (mesmas imagens da matriz
+        # validada na Fase 0 — POC-FASE0 §3).
+        tag: ['2.5-sc', '3.0', '4.0', 'v5.0']
+    env:
+      # Endereço do serviço: em job com `services`, o container é publicado na
+      # porta do runner, então o cliente conecta em 127.0.0.1:3050.
+      FB_POC_HOST: 127.0.0.1
+      FB_POC_PORT: '3050'
+      # Caminho ABSOLUTO no servidor: nome relativo resolveria contra o working
+      # dir do processo do servidor, não contra o do cliente.
+      FB_POC_DATABASE: /firebird/data/poc.fdb
+      FB_POC_USER: SYSDBA
+      # Credencial descartável do container de teste (mesma do
+      # `scripts/firebird-env.sh`); não é segredo de ambiente real (FR-016).
+      FB_POC_PASSWORD: masterkey
+    services:
+      firebird:
+        image: jacobalberty/firebird:${{ matrix.tag }}
+        env:
+          # O entrypoint da imagem usa ISC_PASSWORD para criar o SYSDBA dono do
+          # banco; FIREBIRD_PASSWORD só age com FIREBIRD_USER definido — por isso
+          # só repassamos os dois valores do container de teste.
+          FIREBIRD_DATABASE: poc.fdb
+          ISC_PASSWORD: ${{ env.FB_POC_PASSWORD }}
+          FIREBIRD_PASSWORD: ${{ env.FB_POC_PASSWORD }}
+        ports:
+          - 3050:3050
+        # A imagem JÁ traz HEALTHCHECK próprio; não sobrescrevemos com
+        # `--health-cmd` para não perder o sinal canônico de "servidor pronto".
+        # O runner do Actions só inicia os steps depois de `healthy`, e o passo
+        # seguinte apenas confirma e registra o id do container.
+        options: >-
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain estável
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache de compilação (registry + target)
+        uses: Swatinem/rust-cache@v2
+
+      - name: Aguardar o Firebird ficar healthy (porta aberta ≠ servidor pronto)
+        id: fb
+        env:
+          TAG: ${{ matrix.tag }}
+        run: |
+          set -euo pipefail
+          imagem="jacobalberty/firebird:${TAG}"
+
+          cid_do_container() {
+            local cid
+            cid="$(docker ps --filter "ancestor=${imagem}" --format '{{.ID}}' | head -n 1)"
+            if [ -z "$cid" ]; then
+              cid="$(docker ps --format '{{.ID}} {{.Image}}' |
+                awk -v img="${imagem}" '$2 == img { print $1; exit }')"
+            fi
+            printf '%s' "$cid"
+          }
+
+          cid="$(cid_do_container)"
+          if [ -z "$cid" ]; then
+            echo "::error::container de ${imagem} não encontrado entre os containers em execução"
+            docker ps -a || true
+            exit 1
+          fi
+
+          for i in $(seq 1 120); do
+            estado="$(docker inspect \
+              -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}sem-healthcheck{{end}}' \
+              "$cid")"
+            case "$estado" in
+              healthy)
+                # Acolhimento curto: o healthcheck é o sinal canônico, mas o banco
+                # é criado logo depois do listener ficar de pé. Os 5s evitam a
+                # corrida "-923 connection rejected" sem mascarar falha real —
+                # qualquer problema de verdade aparece no checklist.
+                sleep 5
+                echo "Firebird ${TAG} healthy em ${i}s (container ${cid})"
+                echo "container_id=${cid}" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+              unhealthy)
+                echo "::error::container ${cid} de ${TAG} ficou unhealthy"
+                docker logs --tail 60 "$cid" || true
+                exit 1
+                ;;
+              sem-healthcheck)
+                # Fallback para imagem sem HEALTHCHECK: sonda a porta mapeada e
+                # segue; se o servidor ainda recusar conexão, o checklist falha
+                # com o erro real em vez de passar por alto.
+                echo "::warning::imagem ${imagem} sem HEALTHCHECK — sondando a porta 3050"
+                sleep 20
+                echo "container_id=${cid}" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+            esac
+            sleep 1
+          done
+
+          echo "::error::Firebird ${TAG} não ficou healthy em 120s"
+          docker logs --tail 60 "$cid" || true
+          exit 1
+
+      - name: Extrair a lib cliente do próprio container
+        id: libs
+        env:
+          TAG: ${{ matrix.tag }}
+          CID: ${{ steps.fb.outputs.container_id }}
+        # A lib vem da MESMA imagem do servidor (par cliente/servidor condizente
+        # por construção) e não toca em bibliotecas do sistema — a lição da
+        # Fase 0 (POC-FASE0 §5.3 e §8).
+        run: |
+          set -euo pipefail
+          work="${RUNNER_TEMP}/firebird-libs/${TAG}"
+          mkdir -p "$work"
+          # O mesmo diretório vai no LD_LIBRARY_PATH do passo de teste: é ele
+          # que faz o loader encontrar as dependências copiadas daqui abaixo.
+          export LD_LIBRARY_PATH="${work}"
+
+          docker cp "$CID:/usr/local/firebird/lib/." "$work/"
+
+          lib="$(find "$work" -maxdepth 2 -type f -name 'libfbclient.so.*' |
+            sort -V | tail -n 1)"
+          if [ -z "$lib" ]; then
+            echo "::error::libfbclient não encontrada em /usr/local/firebird/lib (${TAG})"
+            ls -R "$work" || true
+            exit 1
+          fi
+
+          # Dependências dinâmicas que faltarem no runner (libtommath,
+          # libtomcrypt, ncurses...) vêm do mesmo container, resolvendo o
+          # symlink lá dentro para copiar o arquivo de verdade.
+          ausentes="$(ldd "$lib" 2>/dev/null | awk '/=> not found/ { print $1 }' || true)"
+          for dep in $ausentes; do
+            origem="$(docker exec "$CID" bash -lc \
+              "readlink -f /usr/lib/x86_64-linux-gnu/${dep} 2>/dev/null ||
+               readlink -f /lib/x86_64-linux-gnu/${dep} 2>/dev/null ||
+               readlink -f /usr/lib/${dep} 2>/dev/null ||
+               true")"
+            if [ -n "${origem}" ] && docker cp "$CID:${origem}" "$work/" 2>/dev/null; then
+              # O loader procura pelo nome de SONAME (ex.: `libtomcrypt.so.1`),
+              # que costuma diferir do arquivo real (`libtomcrypt.so.1.0.1`):
+              # sem este symlink a dependência continuaria "not found".
+              base="$(basename "${origem}")"
+              if [ "${base}" != "${dep}" ]; then
+                ln -sf "${base}" "$work/${dep}"
+              fi
+              echo "dependência copiada do container: ${dep} -> ${base}"
+            else
+              echo "::warning::dependência ${dep} não resolvida no runner nem no container ${TAG}"
+            fi
+          done
+
+          faltando="$(ldd "$lib" 2>/dev/null | awk '/=> not found/ { print $1 }' || true)"
+          if [ -n "${faltando}" ]; then
+            echo "::warning::ainda sem resolução no runner: ${faltando}"
+          fi
+
+          echo "lib_path=${lib}" >> "$GITHUB_OUTPUT"
+          echo "lib_dir=${work}" >> "$GITHUB_OUTPUT"
+          echo "lib em uso: ${lib}"
+          ldd "$lib" | sed 's/^/ldd: /'
+
+      - name: Checklist de integração (cargo test -p integration-firebird)
+        # Com todas as `FB_POC_*` definidas, o harness roda de verdade contra o
+        # servidor da matriz (sem elas ele ignoraria — e não testaria nada).
+        env:
+          FB_POC_LIB_PATH: ${{ steps.libs.outputs.lib_path }}
+          LD_LIBRARY_PATH: ${{ steps.libs.outputs.lib_dir }}
+        run: cargo test --locked -p integration-firebird -- --nocapture

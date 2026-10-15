@@ -1,0 +1,41 @@
+# Dependabot — atualização de baixo volume, agrupada por subsistema.
+#
+# Dois ecossistemas só: as dependências Rust do workspace Cargo (raiz) e as
+# dependências npm/pnpm do workspace de apps. Atualização semanal, poucos PRs
+# abertos por vez e agrupamento por subsistema, para o histórico de dependências
+# ficar legível e revisável (CONTRIBUTING — PRs pequenos, um tema por PR).
+#
+# `github-actions` fica de fora de propósito: o CI da Fase 1 está nascendo e as
+# actions ficam com tag de versão (`actions/checkout@v4`, `Swatinem/rust-cache@v2`,
+# ...); avaliar o ecossistema `github-actions` aqui é decisão de fase posterior.
+
+version: 2
+
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      rust:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: "/apps/desktop"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      frontend:
+        patterns:
+          - "*"
