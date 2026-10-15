@@ -4,7 +4,12 @@
 //! exibição em log, erro ou DTO, use sempre [`DomainError::redacted`] (FR-016).
 
 /// Erros de domínio, independentes de driver e de Tauri.
-#[derive(Debug, thiserror::Error)]
+///
+/// O [`Debug`](std::fmt::Debug) é manual e já sai redigido, para que panics,
+/// `main() -> Result<_, DomainError>` e `log!("{err:?}")` nunca vaziem
+/// credenciais (FR-016); o `Display` é literal e deve ser exibido apenas
+/// via [`DomainError::redacted`].
+#[derive(thiserror::Error)]
 pub enum DomainError {
     /// Falha ao interpretar a versão do servidor.
     #[error("não foi possível interpretar a versão do servidor: {raw}")]
@@ -17,6 +22,18 @@ pub enum DomainError {
     /// Erro na consulta de catálogo (`RDB$...`).
     #[error("erro de catálogo: {message}")]
     Catalog { message: String },
+}
+
+impl std::fmt::Debug for DomainError {
+    /// Imprime o nome da variante e a mensagem com credenciais redigidas.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let variante = match self {
+            DomainError::ParseVersion { .. } => "ParseVersion",
+            DomainError::Driver { .. } => "Driver",
+            DomainError::Catalog { .. } => "Catalog",
+        };
+        write!(f, "{variante}({})", redact_secrets(&self.to_string()))
+    }
 }
 
 impl DomainError {
@@ -109,5 +126,25 @@ mod tests {
             raw: "versão inválida".to_string(),
         };
         assert!(err.redacted().contains("versão inválida"));
+    }
+
+    #[test]
+    fn debug_nao_exibe_senha() {
+        let err = DomainError::Driver {
+            message: "password=abc123 denied".to_string(),
+        };
+        let texto = format!("{err:?}");
+        assert!(
+            !texto.contains("abc123"),
+            "a senha não pode aparecer no Debug: {texto}"
+        );
+        assert!(
+            texto.contains("password=***"),
+            "o Debug deve exibir a senha redigida: {texto}"
+        );
+        assert!(
+            texto.contains("Driver"),
+            "o Debug deve manter o nome da variante: {texto}"
+        );
     }
 }
