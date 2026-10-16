@@ -52,6 +52,31 @@ Baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
     navegação por teclado `role=tree` com `aria-expanded`/`aria-level`, estados
     de carregamento/vazio/erro, pt-BR) integrada como aba "Explorador"; perfis
     conectados vêm dos comandos de conexão já existentes.
+- **Fase 2 — Passos 2 a 4: SQL Editor, execução e histórico/scripts**:
+  - `FirebirdAdapter::query_rows_with_columns` (nomes de coluna + linhas como texto),
+    com implementações real (`rsfbclient`) e sintéticas.
+  - Comandos Tauri `query_run`, `script_save`, `script_get`, `script_list`,
+    `script_delete`, `history_list` e `history_clear`; `query_run` classifica a
+    instrução (SELECT/WITH → linhas; demais → afetadas), mede duração e grava o
+    histórico automaticamente (falha de storage não quebra a execução).
+  - `BancoLocal` expõe `QueryHistoryRepository` e `SavedScriptRepository` (chamadas
+    totalmente qualificadas por trait, sem ambiguidade de nomes).
+  - UI `features/sql-editor`: CodeMirror 6 com realce SQL, abas, execução de múltiplos
+    statements (parser de delimitadores que respeita literais e comentários), grade de
+    resultados com `NULL` distinguível, scripts salvos e histórico.
+- **Fase 2 — Ajustes de UX (hardening com banco real)**:
+  - Layout full-height (`calc(100vh - 1rem)`) e painel SQL ocupando a tela inteira.
+  - Lista filtrável de tabelas/views/procedures integrada ao editor; **duplo clique**
+    abre o objeto em nova aba com `SELECT FIRST 500 * FROM <objeto>`.
+  - Grade com scroll vertical (`45vh`) e carregamento progressivo de 100 linhas por
+    scroll, em vez de renderizar o resultado inteiro.
+  - Autocomplete no editor: palavras-chave SQL e nomes de objetos do banco.
+  - Atalhos no estilo IBExpert: `Ctrl+Enter`/`F9` (executar), `Ctrl+Shift+Enter`,
+    `Ctrl+S` (salvar script), `Ctrl+N` (nova aba), `Ctrl+W` (fechar aba).
+  - Tema claro/escuro alternável, persistido em `localStorage`.
+  - Correções de inicialização: SQLite em `app_data_dir/studio.db` (o caminho cru
+    quebrava a abertura) e remoção de `devUrl` para o binário release carregar os
+    assets locais.
 - Estrutura inicial do repositório (monorepo pnpm + workspace Cargo Rust).
 - Especificação técnica extraída por tema em `docs/specs/` (17 documentos, do documento
   original v0.1 preservado em `docs/original/`).

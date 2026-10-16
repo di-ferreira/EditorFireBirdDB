@@ -6,11 +6,12 @@
 [![Plataforma](https://img.shields.io/badge/plataforma-Linux%20x86__64-orange.svg)](docs/specs/01-compatibilidade-firebird.md)
 [![Firebird](https://img.shields.io/badge/Firebird-2.0%20%E2%80%93%205.0-green.svg)](docs/compatibility/)
 
-> **Status:** Fase 1 (fundação) concluída — prova de conceito validada e a base do produto
-> entregue: CI, persistência SQLite, cofre de segredos, gerenciador de conexões e a UI de
-> conexões. Firebird **2.5.9, 3.0.10, 4.0.0 e 5.0.0** foram validados no checklist PoC
-> (6/6 cada); **2.0/2.1 seguem não testados** — nenhuma versão é declarada "suportada" sem
-> evidência de teste reproduzível.
+> **Status:** Fase 2 (DB Explorer + SQL Editor) concluída e validada contra um banco
+> Firebird real (2.5.9): CI, persistência SQLite, cofre de segredos, gerenciador de
+> conexões, catálogo sob demanda, editor SQL com CodeMirror, execução de consultas com
+> grade rolável, histórico e scripts salvos. Firebird **2.5.9, 3.0.10, 4.0.0 e 5.0.0**
+> foram validados no checklist PoC (6/6 cada); **2.0/2.1 seguem não testados** — nenhuma
+> versão é declarada "suportada" sem evidência de teste reproduzível.
 
 ## Proposta
 
