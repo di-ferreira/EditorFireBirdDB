@@ -198,13 +198,8 @@ export default function App(): JSX.Element {
           hidden={aba !== "sql"}
         >
           {aba === "sql" && (
-            <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: "1rem", alignItems: "start" }}>
-              <div style={{ overflow: "auto", maxHeight: "70vh" }}>
-                <DbExplorerPanel onOpenTable={(perfilId, relacao) => { setAba("sql"); setPendingOpenTable({ perfilId, table: relacao, nonce: Date.now() }); }} />
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <SqlEditorPanel openTableRequest={pendingOpenTable} />
-              </div>
+            <div style={{ display: "block" }}>
+              <SqlEditorPanel openTableRequest={pendingOpenTable} />
             </div>
           )}
         </div>

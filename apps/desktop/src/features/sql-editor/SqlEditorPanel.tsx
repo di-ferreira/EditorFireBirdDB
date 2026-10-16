@@ -116,6 +116,7 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
   const [objetosBusca, setObjetosBusca] = useState("");
   const [objetos, setObjetos] = useState<{ nome: string; kind: string }[]>([]);
   const [carregandoObjetos, setCarregandoObjetos] = useState(false);
+  const [visibleRows, setVisibleRows] = useState(100);
 
   const carregarObjetos = useCallback(async (perfil: string) => {
     if (!perfil) { setObjetos([]); return; }
@@ -209,10 +210,12 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
     const id = novoid();
     setAbas((prev) => [...prev, { id, title: `Dados: ${tabela}`, content: `SELECT FIRST 500 * FROM ${tabela}` }]);
     setAbaAtiva(id);
+    setVisibleRows(100);
     setTimeout(() => { void executarRef.current?.(); }, 150);
   }, [perfilId]);
 
   const executar = useCallback(async () => {
+    setVisibleRows(100);
     atualizarAbaConteudo();
     if (!perfilId) { setMensagemErro("Selecione uma conexão ativa."); return; }
     const texto = lerConteudo();
@@ -367,7 +370,7 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
                   : `${r.rowCount} linhas · ${r.elapsedMs} ms`}
               </div>
               {r.kind === "rows" && (
-                <div style={{ overflow: "auto", border: "1px solid #d9dce1", borderRadius: "6px" }}>
+                <div style={{ overflowY: "auto", maxHeight: "45vh", border: "1px solid #d9dce1", borderRadius: "6px" }}>
                   <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.9rem" }}>
                     <thead>
                       <tr>
@@ -379,7 +382,7 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
                       </tr>
                     </thead>
                     <tbody>
-                      {r.rows.map((row, ri) => (
+                      {r.rows.slice(0, Math.min(visibleRows, r.rows.length)).map((row, ri) => (
                         <tr key={ri}>
                           {row.map((cell, ci) => (
                             <td key={ci} style={{ padding: "0.3rem", borderBottom: "1px solid #eee", whiteSpace: "nowrap" }}>
@@ -390,6 +393,13 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
                       ))}
                     </tbody>
                   </table>
+                  {visibleRows < r.rowCount && (
+                    <div style={{ padding: "0.4rem", textAlign: "center" }}>
+                      <button type="button" style={estilo.botao} onClick={() => setVisibleRows((n) => n + 100)}>
+                        Mostrar mais ({r.rowCount - visibleRows} restantes)
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
