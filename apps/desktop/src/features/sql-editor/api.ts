@@ -97,3 +97,11 @@ export async function chavesDaTabela(perfilId: string, tabela: string): Promise<
   try { return await invoke<string[]>("table_keys", { profileId: perfilId, relation: tabela }); }
   catch (e) { throw normalizarErro(e); }
 }
+
+/** Colunas da relação com o sinal de quais estouram o limite de buffer (-204). */
+export type ColunaTabela = { name: string; exceedsBuffer: boolean };
+
+export async function colunasDaTabela(perfilId: string, tabela: string): Promise<ColunaTabela[]> {
+  try { return await invoke<ColunaTabela[]>("table_columns", { profileId: perfilId, relation: tabela }); }
+  catch (e) { throw normalizarErro(e); }
+}

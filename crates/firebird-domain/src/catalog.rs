@@ -182,3 +182,54 @@ impl CategoriaCatalogo {
         ]
     }
 }
+
+/// Uma coluna de relação com o tamanho declarado do campo.
+///
+/// Usada para montar um `SELECT` que cabe no limite de buffer do Firebird
+/// (erro `-204`): BLOB e campos muito largos são os causadores típicos.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColunaInfo {
+    /// Nome do campo na relação.
+    pub name: String,
+    /// Código do tipo no catálogo (`RDB$FIELD_TYPE`).
+    pub field_type: i32,
+    /// Comprimento declarado em bytes (`RDB$FIELD_LENGTH`).
+    pub field_length: i32,
+}
+
+impl ColunaInfo {
+    /// `true` para BLOB (`field_type` 261) ou campos acima de `LIMITE_CAMPO_SEGURO`.
+    pub fn excede_buffer_seguro(&self) -> bool {
+        const LIMITE_CAMPO_SEGURO: i32 = 4_000;
+        const TIPO_BLOB: i32 = 261;
+        self.field_type == TIPO_BLOB || self.field_length > LIMITE_CAMPO_SEGURO
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blob_e_campo_largo_excedem_o_buffer_seguro() {
+        let blob = ColunaInfo {
+            name: "ANEXO".into(),
+            field_type: 261,
+            field_length: 0,
+        };
+        let largo = ColunaInfo {
+            name: "TEXTO".into(),
+            field_type: 37,
+            field_length: 32_000,
+        };
+        let ok = ColunaInfo {
+            name: "NOME".into(),
+            field_type: 37,
+            field_length: 100,
+        };
+
+        assert!(blob.excede_buffer_seguro());
+        assert!(largo.excede_buffer_seguro());
+        assert!(!ok.excede_buffer_seguro());
+    }
+}

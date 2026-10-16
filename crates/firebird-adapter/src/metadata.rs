@@ -7,9 +7,9 @@
 //! viram ausência (`None`); nada é inventado (Spec 01, §4).
 
 use firebird_domain::{
-    ConstraintInfo, ConstraintTipo, DomainError, DominioInfo, FieldInfo, GeneratorInfo, IndiceInfo,
-    InfoBanco, ParametroInfo, ProceduraInfo, RelationKind, RelationSummary, ServerVersion,
-    TriggerInfo,
+    catalog::ColunaInfo, ConstraintInfo, ConstraintTipo, DomainError, DominioInfo, FieldInfo,
+    GeneratorInfo, IndiceInfo, InfoBanco, ParametroInfo, ProceduraInfo, RelationKind,
+    RelationSummary, ServerVersion, TriggerInfo,
 };
 
 use crate::FirebirdAdapter;
@@ -159,6 +159,49 @@ impl MetadataRepository {
             });
         }
         Ok(out)
+    }
+
+    /// Colunas de uma relação com o tipo/tamanho declarado do campo.
+    ///
+    /// `RDB$RELATION_FIELDS` + `RDB$FIELDS` existem em todas as versões
+    /// suportadas e dizem quais campos estouram o limite de buffer do
+    /// Firebird (erro `-204`) quando todos vêm num `SELECT *`.
+    pub fn colunas(
+        &self,
+        adapter: &mut dyn FirebirdAdapter,
+        relacao: &str,
+    ) -> Result<Vec<ColunaInfo>, DomainError> {
+        let sql = format!(
+            "SELECT TRIM(rf.RDB$FIELD_NAME), f.RDB$FIELD_TYPE, f.RDB$FIELD_LENGTH \
+             FROM RDB$RELATION_FIELDS rf \
+             JOIN RDB$FIELDS f ON TRIM(f.RDB$FIELD_NAME) = TRIM(rf.RDB$FIELD_SOURCE) \
+             WHERE TRIM(rf.RDB$RELATION_NAME) = '{}' \
+             ORDER BY rf.RDB$FIELD_POSITION",
+            escapar_literal(relacao)
+        );
+        let linhas = adapter.query_rows(&sql)?;
+        Ok(linhas
+            .iter()
+            .map(|linha| {
+                let num = |i: usize| {
+                    linha
+                        .get(i)
+                        .and_then(Option::as_deref)
+                        .and_then(|v| v.trim().parse::<i32>().ok())
+                        .unwrap_or(0)
+                };
+                ColunaInfo {
+                    name: linha
+                        .first()
+                        .and_then(Option::as_deref)
+                        .map(|v| limpar_char(v).trim().to_string())
+                        .unwrap_or_default(),
+                    field_type: num(1),
+                    field_length: num(2),
+                }
+            })
+            .filter(|c| !c.name.is_empty())
+            .collect())
     }
 
     /// Colunas da chave primária de uma relação, na ordem do índice.
@@ -584,6 +627,40 @@ mod tests {
             minor,
             patch: None,
         }
+    }
+
+    #[test]
+    fn colunas_marca_blob_e_campo_largo() {
+        let mut fake = FakeAdapter::new(vec![(
+            "RDB$FIELD_TYPE",
+            vec![
+                vec![
+                    Some("NOME".to_string()),
+                    Some("37".to_string()),
+                    Some("100".to_string()),
+                ],
+                vec![
+                    Some("ANEXO".to_string()),
+                    Some("261".to_string()),
+                    Some("0".to_string()),
+                ],
+                vec![
+                    Some("TEXTO".to_string()),
+                    Some("37".to_string()),
+                    Some("32000".to_string()),
+                ],
+            ],
+        )]);
+
+        let colunas = MetadataRepository::new()
+            .colunas(&mut fake, "EST")
+            .expect("colunas");
+
+        assert_eq!(colunas.len(), 3);
+        assert_eq!(colunas[0].name, "NOME");
+        assert!(!colunas[0].excede_buffer_seguro());
+        assert!(colunas[1].excede_buffer_seguro(), "BLOB excede");
+        assert!(colunas[2].excede_buffer_seguro(), "campo largo excede");
     }
 
     #[test]

@@ -431,3 +431,40 @@ pub fn table_keys(
         })
         .map_err(|e| CommandError::consulta(e.to_string()))
 }
+
+/// Colunas da relação com tamanho declarado, marcando as que estouram o
+/// limite de buffer do Firebird (erro `-204`).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ColunaTabelaDto {
+    pub name: String,
+    pub exceeds_buffer: bool,
+}
+
+/// Lista as colunas de uma relação e sinaliza quais não devem entrar num
+/// `SELECT` quando o erro `-204` (block size) aparecer.
+#[tauri::command]
+pub fn table_columns(
+    profile_id: String,
+    relation: String,
+    deps: tauri::State<'_, AppState>,
+) -> Result<Vec<ColunaTabelaDto>, CommandError> {
+    let manager: &ConnectionManager = deps.manager();
+    manager
+        .executar_no_adaptador_conectado(&profile_id, |adapter| {
+            use firebird_adapter::MetadataRepository;
+            let repo = MetadataRepository::new();
+            repo.colunas(&mut **adapter, &relation)
+                .map_err(|e| ErroGerente::Conexao(e.to_string()))
+        })
+        .map(|colunas| {
+            colunas
+                .into_iter()
+                .map(|c| ColunaTabelaDto {
+                    exceeds_buffer: c.excede_buffer_seguro(),
+                    name: c.name,
+                })
+                .collect()
+        })
+        .map_err(CommandError::consulta)
+}

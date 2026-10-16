@@ -18,6 +18,6 @@ pub use connections::{
 pub use error::{CommandError, CommandErrorCode};
 pub use sql::{
     history_clear, history_list, query_cancel, query_run, script_delete, script_get, script_list,
-    script_save, table_keys, transaction_begin, transaction_commit, transaction_rollback,
-    TransactionStatusDto,
+    script_save, table_columns, table_keys, transaction_begin, transaction_commit,
+    transaction_rollback, ColunaTabelaDto, TransactionStatusDto,
 };

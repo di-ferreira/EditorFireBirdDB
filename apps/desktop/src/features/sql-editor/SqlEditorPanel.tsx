@@ -16,6 +16,7 @@ import type { ConnectionProfile, ConnectionStatusInfo } from "../connections/typ
 import {
   cancelarConsulta,
   chavesDaTabela,
+  colunasDaTabela,
   confirmarTransacao,
   desfazerTransacao,
   executarConsulta,
@@ -51,6 +52,10 @@ const literalSql = (valor: string): string => {
   if (/^-?\d+(\.\d+)?$/.test(texto)) return texto;
   return `'${texto.replace(/'/g, "''")}'`;
 };
+
+/** `true` quando o erro é o limite de buffer do Firebird (`-204`). */
+const erroDeBuffer = (mensagem: string): boolean =>
+  /-204|block size exceeds|implementation limit/i.test(mensagem);
 
 /** Aspas um identificador quando ele não for simples (evita erro de SQL). */
 const identificador = (nome: string): string => (/^[A-Za-z_][A-Za-z0-9_$]*$/.test(nome) ? nome : `"${nome.replace(/"/g, '"""')}"`);
@@ -266,6 +271,13 @@ export default function SqlEditorPanel({ openTableRequest, escuro }: { openTable
 
   const lerConteudo = () => viewRef.current?.state.doc.toString() ?? aba?.content ?? "";
 
+  /** Substitui o conteúdo do editor (usado pelo fallback de colunas do -204). */
+  const definirDoc = (texto: string) => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: texto } });
+  };
+
   const atualizarAbaConteudo = () => {
     const texto = lerConteudo();
     setAbas((prev) => prev.map((a) => (a.id === abaAtiva ? { ...a, content: texto } : a)));
@@ -308,15 +320,36 @@ export default function SqlEditorPanel({ openTableRequest, escuro }: { openTable
         if (ehConsulta) {
           const queryId = novoid();
           consultaAtivaRef.current = queryId;
-          const pagina = await executarPagina(perfilId, instrucao, queryId, 0, TAMANHO_PAGINA);
           const tabela = tabelaPorAba[abaAtiva];
+          let sql = instrucao;
+          let pagina;
+          try {
+            pagina = await executarPagina(perfilId, sql, queryId, 0, TAMANHO_PAGINA);
+          } catch (erro: any) {
+            const mensagem = erro?.message ?? String(erro);
+            // -204: a linha não cabe no buffer do engine (BLOB/ VARCHAR muito
+            // largo). Refaz o SELECT sem as colunas que estouram o limite.
+            if (!tabela || !erroDeBuffer(mensagem)) throw erro;
+            const colunas = await colunasDaTabela(perfilId, tabela).catch(() => [] as { name: string; exceedsBuffer: boolean }[]);
+            const seguras = colunas.filter((c) => !c.exceedsBuffer);
+            if (seguras.length === 0 || seguras.length === colunas.length) throw erro;
+            sql = `SELECT FIRST 500 ${seguras.map((c) => identificador(c.name)).join(", ")} FROM ${identificador(tabela)}`;
+            const ignoradas = colunas.length - seguras.length;
+            setMensagemErro(
+              `${tabela}: ${ignoradas} coluna(s) BLOB/muito larga(s) foram omitidas para caber no limite de buffer do Firebird (erro -204). ` +
+                "Edite o SELECT para escolher quais colunas carregar.",
+            );
+            definirDoc(sql);
+            setAbas((prev) => prev.map((a) => (a.id === abaAtiva ? { ...a, content: sql } : a)));
+            pagina = await executarPagina(perfilId, sql, queryId, 0, TAMANHO_PAGINA);
+          }
           const chavePrimaria =
             tabela && pagina.columns.length > 0 ? await chavesDaTabela(perfilId, tabela).catch(() => [] as string[]) : [];
           setBlocos((prev) => [
             ...prev,
             {
               id: novoid(),
-              sql: instrucao,
+              sql,
               resultado: pagina,
               queryId,
               temMais: pagina.hasMore ?? false,

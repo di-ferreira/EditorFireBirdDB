@@ -103,6 +103,13 @@ Baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
   - Grade editável em abas de dados (duplo clique numa tabela): duplo clique na célula
     edita e grava com `UPDATE ... WHERE <chave primária>`. Sem PK (ou sem a PK no
     SELECT) a edição é bloqueada com aviso — nunca há UPDATE sem WHERE.
+- **Fallback do erro `-204` (block size)**:
+  - `ColunaInfo::excede_buffer_seguro` no domínio (BLOB ou campo > 4.000 bytes) e
+    `MetadataRepository::colunas` (`RDB$RELATION_FIELDS` + `RDB$FIELDS`) com o
+    comando `table_columns`.
+  - Ao abrir uma tabela cujo `SELECT *` estoura o limite de buffer do engine, o
+    editor refaz a consulta **sem as colunas largas/BLOB**, avisa quantas foram
+    omitidas e reescreve o SQL da aba com o `SELECT` seguro.
 - Estrutura inicial do repositório (monorepo pnpm + workspace Cargo Rust).
 - Especificação técnica extraída por tema em `docs/specs/` (17 documentos, do documento
   original v0.1 preservado em `docs/original/`).
