@@ -15,7 +15,8 @@ use application::estado::AppState;
 use commands::{
     catalog_get_node, connection_close, connection_get_status, connection_list_profiles,
     connection_open, connection_save_profile, connection_test_profile, history_clear, history_list,
-    query_cancel, query_run, script_delete, script_get, script_list, script_save,
+    query_cancel, query_run, script_delete, script_get, script_list, script_save, table_keys,
+    transaction_begin, transaction_commit, transaction_rollback,
 };
 use firebird_domain::VERSION as DOMAIN_VERSION;
 use tauri::Manager;
@@ -98,6 +99,10 @@ pub fn run() {
             history_list,
             query_cancel,
             query_run,
+            table_keys,
+            transaction_begin,
+            transaction_commit,
+            transaction_rollback,
             script_delete,
             script_get,
             script_list,

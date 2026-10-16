@@ -71,3 +71,29 @@ export async function listarHistorico(limite = 50): Promise<HistoryEntryDto[]> {
 }
 
 export { normalizarErro };
+
+export type TransactionStatus = { inTransaction: boolean; message: string };
+
+/** Inicia transação manual: os próximos DML ficam pendentes. */
+export async function iniciarTransacao(perfilId: string): Promise<TransactionStatus> {
+  try { return await invoke<TransactionStatus>("transaction_begin", { profileId: perfilId }); }
+  catch (e) { throw normalizarErro(e); }
+}
+
+/** Confirma a transação pendente (Commit). */
+export async function confirmarTransacao(perfilId: string): Promise<TransactionStatus> {
+  try { return await invoke<TransactionStatus>("transaction_commit", { profileId: perfilId }); }
+  catch (e) { throw normalizarErro(e); }
+}
+
+/** Desfaz a transação pendente (Rollback). */
+export async function desfazerTransacao(perfilId: string): Promise<TransactionStatus> {
+  try { return await invoke<TransactionStatus>("transaction_rollback", { profileId: perfilId }); }
+  catch (e) { throw normalizarErro(e); }
+}
+
+/** Colunas da chave primária da tabela (vazio = sem PK → grade somente leitura). */
+export async function chavesDaTabela(perfilId: string, tabela: string): Promise<string[]> {
+  try { return await invoke<string[]>("table_keys", { profileId: perfilId, relation: tabela }); }
+  catch (e) { throw normalizarErro(e); }
+}

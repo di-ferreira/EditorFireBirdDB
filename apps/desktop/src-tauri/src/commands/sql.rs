@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use crate::application::connection_manager::ConnectionManager;
+use crate::application::connection_manager::{ConnectionManager, ErroGerente};
 use crate::application::estado::AppState;
 use crate::commands::error::CommandError;
 use firebird_storage::{agora_iso8601, QueryHistoryEntry, SavedScript};
@@ -325,4 +325,109 @@ pub fn query_cancel(
     deps: tauri::State<'_, AppState>,
 ) -> Result<bool, CommandError> {
     Ok(deps.cancelar(&query_id))
+}
+
+/// Estado da transação da sessão (`true` quando há alterações pendentes).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransactionStatusDto {
+    pub in_transaction: bool,
+    pub message: String,
+}
+
+/// Inicia uma transação manual: os próximos DML ficam pendentes até
+/// `transaction_commit` ou `transaction_rollback`.
+#[tauri::command]
+pub fn transaction_begin(
+    profile_id: String,
+    deps: tauri::State<'_, AppState>,
+) -> Result<TransactionStatusDto, CommandError> {
+    let manager: &ConnectionManager = deps.manager();
+    manager
+        .executar_no_adaptador_conectado(&profile_id, |adapter| {
+            adapter
+                .begin_transaction()
+                .map_err(|e| ErroGerente::Conexao(e.to_string()))
+        })
+        .map_err(CommandError::consulta)?;
+    Ok(TransactionStatusDto {
+        in_transaction: true,
+        message: "transação iniciada: as alterações ficam pendentes até Commit ou Rollback"
+            .to_string(),
+    })
+}
+
+/// Confirma a transação pendente.
+#[tauri::command]
+pub fn transaction_commit(
+    profile_id: String,
+    deps: tauri::State<'_, AppState>,
+) -> Result<TransactionStatusDto, CommandError> {
+    let manager: &ConnectionManager = deps.manager();
+    let estava_ativa = manager
+        .executar_no_adaptador_conectado(&profile_id, |adapter| Ok(adapter.in_transaction()))
+        .map_err(CommandError::consulta)?;
+    manager
+        .executar_no_adaptador_conectado(&profile_id, |adapter| {
+            adapter
+                .commit()
+                .map_err(|e| ErroGerente::Conexao(e.to_string()))
+        })
+        .map_err(CommandError::consulta)?;
+    Ok(TransactionStatusDto {
+        in_transaction: false,
+        message: if estava_ativa {
+            "transação confirmada (Commit)".to_string()
+        } else {
+            "não havia transação pendente".to_string()
+        },
+    })
+}
+
+/// Desfaz a transação pendente.
+#[tauri::command]
+pub fn transaction_rollback(
+    profile_id: String,
+    deps: tauri::State<'_, AppState>,
+) -> Result<TransactionStatusDto, CommandError> {
+    let manager: &ConnectionManager = deps.manager();
+    let estava_ativa = manager
+        .executar_no_adaptador_conectado(&profile_id, |adapter| Ok(adapter.in_transaction()))
+        .map_err(CommandError::consulta)?;
+    manager
+        .executar_no_adaptador_conectado(&profile_id, |adapter| {
+            adapter
+                .rollback()
+                .map_err(|e| ErroGerente::Conexao(e.to_string()))
+        })
+        .map_err(CommandError::consulta)?;
+    Ok(TransactionStatusDto {
+        in_transaction: false,
+        message: if estava_ativa {
+            "transação desfeita (Rollback)".to_string()
+        } else {
+            "não havia transação pendente".to_string()
+        },
+    })
+}
+
+/// Chave primária de uma relação (colunas na ordem do índice).
+///
+/// Vazio quando a tabela não tem PK — a UI usa isso para decidir se a grade
+/// pode ser editada com segurança.
+#[tauri::command]
+pub fn table_keys(
+    profile_id: String,
+    relation: String,
+    deps: tauri::State<'_, AppState>,
+) -> Result<Vec<String>, CommandError> {
+    let manager: &ConnectionManager = deps.manager();
+    manager
+        .executar_no_adaptador_conectado(&profile_id, |adapter| {
+            use firebird_adapter::MetadataRepository;
+            let repo = MetadataRepository::new();
+            repo.chave_primaria(&mut **adapter, &relation)
+                .map_err(|e| ErroGerente::Conexao(e.to_string()))
+        })
+        .map_err(|e| CommandError::consulta(e.to_string()))
 }

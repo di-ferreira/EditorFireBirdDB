@@ -133,12 +133,38 @@ pub trait FirebirdAdapter {
         limit: usize,
         cancel: Option<&AtomicBool>,
     ) -> Result<(Vec<String>, Vec<Vec<Option<String>>>, bool), DomainError>;
+
+    /// Inicia uma transação que **não** é commitada automaticamente.
+    ///
+    /// A partir daqui, `execute`/`query_rows` rodam dentro da transação aberta
+    /// até [`commit`](FirebirdAdapter::commit) ou
+    /// [`rollback`](FirebirdAdapter::rollback).
+    fn begin_transaction(&mut self) -> Result<(), DomainError> {
+        Ok(())
+    }
+
+    /// Confirma a transação aberta.
+    fn commit(&mut self) -> Result<(), DomainError> {
+        Ok(())
+    }
+
+    /// Desfaz a transação aberta.
+    fn rollback(&mut self) -> Result<(), DomainError> {
+        Ok(())
+    }
+
+    /// `true` quando há transação aberta aguardando commit/rollback.
+    fn in_transaction(&self) -> bool {
+        false
+    }
 }
 
 /// Adapter concreto sobre o `rsfbclient` nativo com carregamento dinâmico da
 /// `libfbclient.so` escolhida em [`ConnParams::client_library_path`].
 pub struct RsFbClientAdapter {
     conn: Connection<NativeFbClient<DynLoad>>,
+    /// Espelho do estado de transação: o `rsfbclient` mantém o campo privado.
+    transacao_aberta: bool,
 }
 
 impl RsFbClientAdapter {
@@ -167,7 +193,10 @@ impl RsFbClientAdapter {
             .connect()
             .map_err(|e| crate::erro_driver(format!("{e}")))?;
 
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            transacao_aberta: false,
+        })
     }
 
     /// Lê a janela paginada linha a linha, checando cancelamento por linha.
@@ -292,6 +321,45 @@ impl FirebirdAdapter for RsFbClientAdapter {
                 Ok((nomes, janela, tem_mais))
             }
         }
+    }
+
+    fn begin_transaction(&mut self) -> Result<(), DomainError> {
+        if self.transacao_aberta {
+            return Ok(());
+        }
+        self.conn
+            .begin_transaction()
+            .map_err(|e| crate::erro_driver(format!("{e}")))?;
+        self.transacao_aberta = true;
+        Ok(())
+    }
+
+    fn commit(&mut self) -> Result<(), DomainError> {
+        if !self.transacao_aberta {
+            return Ok(());
+        }
+        let resultado = self
+            .conn
+            .commit()
+            .map_err(|e| crate::erro_driver(format!("{e}")));
+        self.transacao_aberta = false;
+        resultado
+    }
+
+    fn rollback(&mut self) -> Result<(), DomainError> {
+        if !self.transacao_aberta {
+            return Ok(());
+        }
+        let resultado = self
+            .conn
+            .rollback()
+            .map_err(|e| crate::erro_driver(format!("{e}")));
+        self.transacao_aberta = false;
+        resultado
+    }
+
+    fn in_transaction(&self) -> bool {
+        self.transacao_aberta
     }
 
     fn execute(&mut self, sql: &str, params: &[Option<&str>]) -> Result<usize, DomainError> {

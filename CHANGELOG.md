@@ -90,6 +90,19 @@ Baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
   - Grade consome páginas de 100 linhas ao chegar ao fim do scroll, com botão
     **Carregar mais** e **Exportar CSV** (UTF-8 com BOM, `;` e aspas duplicadas).
   - CSP ampliada para `blob:` (download do CSV).
+- **Edição de dados na grade e transação manual**:
+  - `MetadataRepository::chave_primaria` (`RDB$RELATION_CONSTRAINTS` →
+    `RDB$INDICES` → `RDB$INDEX_SEGMENTS`) e comando `table_keys`; o nome da relação
+    vai escapado com `escapar_literal`.
+  - Métodos de transação no `FirebirdAdapter` (`begin_transaction`, `commit`,
+    `rollback`, `in_transaction`) sobre `Connection::begin_transaction/commit/rollback`
+    do rsfbclient (com espelho do estado, pois o campo é privado no driver) e comandos
+    `transaction_begin`, `transaction_commit`, `transaction_rollback`.
+  - UI: interruptor **Transação manual** + botões **Commit**/**Rollback** ao lado de
+    Executar, com aviso de estado; as alterações passam a respeitar a transação aberta.
+  - Grade editável em abas de dados (duplo clique numa tabela): duplo clique na célula
+    edita e grava com `UPDATE ... WHERE <chave primária>`. Sem PK (ou sem a PK no
+    SELECT) a edição é bloqueada com aviso — nunca há UPDATE sem WHERE.
 - Estrutura inicial do repositório (monorepo pnpm + workspace Cargo Rust).
 - Especificação técnica extraída por tema em `docs/specs/` (17 documentos, do documento
   original v0.1 preservado em `docs/original/`).

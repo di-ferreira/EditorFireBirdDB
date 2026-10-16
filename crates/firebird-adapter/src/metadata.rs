@@ -161,6 +161,35 @@ impl MetadataRepository {
         Ok(out)
     }
 
+    /// Colunas da chave primária de uma relação, na ordem do índice.
+    ///
+    /// Sai de `RDB$RELATION_CONSTRAINTS` (tipo `PRIMARY KEY`) →
+    /// `RDB$INDICES` → `RDB$INDEX_SEGMENTS`, que existe em todas as versões
+    /// suportadas (2.5+). Vetor vazio = tabela sem PK.
+    pub fn chave_primaria(
+        &self,
+        adapter: &mut dyn FirebirdAdapter,
+        relacao: &str,
+    ) -> Result<Vec<String>, DomainError> {
+        let sql = format!(
+            "SELECT TRIM(s.RDB$FIELD_NAME) FROM RDB$RELATION_CONSTRAINTS rc \
+             JOIN RDB$INDICES i ON TRIM(i.RDB$INDEX_NAME) = TRIM(rc.RDB$INDEX_NAME) \
+             JOIN RDB$INDEX_SEGMENTS s ON TRIM(s.RDB$INDEX_NAME) = TRIM(i.RDB$INDEX_NAME) \
+             WHERE TRIM(rc.RDB$RELATION_NAME) = '{}' AND TRIM(rc.RDB$CONSTRAINT_TYPE) = 'PRIMARY KEY' \
+             ORDER BY s.RDB$FIELD_POSITION",
+            escapar_literal(relacao)
+        );
+        let linhas = adapter.query_rows(&sql)?;
+        Ok(linhas
+            .iter()
+            .filter_map(|l| {
+                l.first()
+                    .and_then(Option::as_deref)
+                    .map(|v| limpar_char(v).trim().to_string())
+            })
+            .collect())
+    }
+
     /// Lista constraints (`RDB$RELATION_CONSTRAINTS` + `RDB$INDICES` quando útil).
     pub fn constraints(
         &self,
@@ -555,6 +584,39 @@ mod tests {
             minor,
             patch: None,
         }
+    }
+
+    #[test]
+    fn chave_primaria_devolve_colunas_na_ordem_do_indice() {
+        let mut fake = FakeAdapter::new(vec![(
+            "RDB$INDEX_SEGMENTS",
+            vec![
+                vec![Some(" ID".to_string())],
+                vec![Some("CODIGO".to_string())],
+            ],
+        )]);
+
+        let colunas = MetadataRepository::new()
+            .chave_primaria(&mut fake, "PESSOAS")
+            .expect("chave primária");
+
+        assert_eq!(colunas, vec!["ID".to_string(), "CODIGO".to_string()]);
+
+        // O nome da relação vai escapado no SQL — sem interpolação crua.
+        let sql = fake.executed_sqls().first().expect("sql executada");
+        assert!(sql.contains("PESSOAS"));
+        assert!(sql.contains("PRIMARY KEY"));
+        assert!(sql.contains("RDB$FIELD_POSITION"));
+    }
+
+    #[test]
+    fn chave_primaria_escapa_nome_com_aspa() {
+        let mut fake = FakeAdapter::new(vec![("RDB$INDEX_SEGMENTS", vec![])]);
+        MetadataRepository::new()
+            .chave_primaria(&mut fake, "T'A'B")
+            .expect("chave primária");
+        let sql = fake.executed_sqls().first().expect("sql executada");
+        assert!(sql.contains("T''A''B"), "aspa deve ser duplicada: {sql}");
     }
 
     #[test]

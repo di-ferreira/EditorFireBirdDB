@@ -15,8 +15,12 @@ import { buscarNoNoCatalogo } from "../db-explorer/api";
 import type { ConnectionProfile, ConnectionStatusInfo } from "../connections/types";
 import {
   cancelarConsulta,
+  chavesDaTabela,
+  confirmarTransacao,
+  desfazerTransacao,
   executarConsulta,
   executarPagina,
+  iniciarTransacao,
   salvarScript,
 } from "./api";
 import type { ApiQueryResult, SqlTab } from "./types";
@@ -29,12 +33,27 @@ type BlocoResultado = {
   queryId: string;
   temMais: boolean;
   carregandoMais: boolean;
+  /** Tabela de origem (aba "Dados: X") — habilita a edição da grade. */
+  tabela?: string;
+  /** Colunas da PK: sem elas a edição é bloqueada (update sem WHERE seria inseguro). */
+  chavePrimaria: string[];
 };
 
 const novoid = () => Math.random().toString(36).slice(2, 10);
 
 /** Linhas por página (paginação no servidor + scroll progressivo). */
 const TAMANHO_PAGINA = 100;
+
+/** Converte o texto editado em literal SQL (NULL, número ou string). */
+const literalSql = (valor: string): string => {
+  const texto = valor.trim();
+  if (texto.length === 0 || texto.toUpperCase() === "NULL") return "NULL";
+  if (/^-?\d+(\.\d+)?$/.test(texto)) return texto;
+  return `'${texto.replace(/'/g, "''")}'`;
+};
+
+/** Aspas um identificador quando ele não for simples (evita erro de SQL). */
+const identificador = (nome: string): string => (/^[A-Za-z_][A-Za-z0-9_$]*$/.test(nome) ? nome : `"${nome.replace(/"/g, '"""')}"`);
 
 const splitStatements = (sql: string): string[] => {
   const out: string[] = [];
@@ -127,6 +146,12 @@ export default function SqlEditorPanel({ openTableRequest, escuro }: { openTable
   const [abas, setAbas] = useState<SqlTab[]>([{ id: novoid(), title: "Nova consulta", content: "" }]);
   const [abaAtiva, setAbaAtiva] = useState<string>(abas[0].id);
   const [blocos, setBlocos] = useState<BlocoResultado[]>([]);
+  const [emTransacao, setEmTransacao] = useState(false);
+  const [mensagemTransacao, setMensagemTransacao] = useState("");
+  /** Aba de dados → tabela de origem (habilita edição com WHERE por PK). */
+  const [tabelaPorAba, setTabelaPorAba] = useState<Record<string, string>>({});
+  const [celulaEmEdicao, setCelulaEmEdicao] = useState<{ bloco: string; linha: number; coluna: number } | null>(null);
+  const [valorEmEdicao, setValorEmEdicao] = useState("");
   const [mensagemErro, setMensagemErro] = useState<string | null>(null);
   const [executando, setExecutando] = useState<boolean>(false);
   const [objetosBusca, setObjetosBusca] = useState("");
@@ -261,6 +286,7 @@ export default function SqlEditorPanel({ openTableRequest, escuro }: { openTable
     if (!perfilId) return;
     const id = novoid();
     setAbas((prev) => [...prev, { id, title: `Dados: ${tabela}`, content: `SELECT FIRST 500 * FROM ${tabela}` }]);
+    setTabelaPorAba((prev) => ({ ...prev, [id]: tabela }));
     setAbaAtiva(id);
     setTimeout(() => { void executarRef.current?.(); }, 150);
   }, [perfilId]);
@@ -283,6 +309,9 @@ export default function SqlEditorPanel({ openTableRequest, escuro }: { openTable
           const queryId = novoid();
           consultaAtivaRef.current = queryId;
           const pagina = await executarPagina(perfilId, instrucao, queryId, 0, TAMANHO_PAGINA);
+          const tabela = tabelaPorAba[abaAtiva];
+          const chavePrimaria =
+            tabela && pagina.columns.length > 0 ? await chavesDaTabela(perfilId, tabela).catch(() => [] as string[]) : [];
           setBlocos((prev) => [
             ...prev,
             {
@@ -292,13 +321,15 @@ export default function SqlEditorPanel({ openTableRequest, escuro }: { openTable
               queryId,
               temMais: pagina.hasMore ?? false,
               carregandoMais: false,
+              tabela,
+              chavePrimaria,
             },
           ]);
         } else {
           const r = await executarConsulta(perfilId, instrucao);
           setBlocos((prev) => [
             ...prev,
-            { id: novoid(), sql: instrucao, resultado: r, queryId: "", temMais: false, carregandoMais: false },
+            { id: novoid(), sql: instrucao, resultado: r, queryId: "", temMais: false, carregandoMais: false, chavePrimaria: [] },
           ]);
         }
       }
@@ -308,7 +339,7 @@ export default function SqlEditorPanel({ openTableRequest, escuro }: { openTable
       consultaAtivaRef.current = null;
       setExecutando(false);
     }
-  }, [perfilId, abaAtiva]);
+  }, [perfilId, abaAtiva, tabelaPorAba]);
 
   /** Carrega a próxima janela de 100 linhas de um bloco com scroll. */
   const carregarMais = useCallback(async (bloco: BlocoResultado) => {
@@ -354,6 +385,95 @@ export default function SqlEditorPanel({ openTableRequest, escuro }: { openTable
     if (!queryId) return;
     await cancelarConsulta(queryId).catch(() => false);
   }, []);
+
+  /** Liga/desliga a transação manual da sessão. */
+  const alternarTransacao = useCallback(async (ligar: boolean) => {
+    if (!perfilId) { setMensagemErro("Selecione uma conexão ativa."); return; }
+    try {
+      const status = ligar
+        ? await iniciarTransacao(perfilId)
+        : await confirmarTransacao(perfilId);
+      setEmTransacao(ligar);
+      setMensagemTransacao(status.message);
+    } catch (e: any) {
+      setMensagemErro(e?.message ?? String(e));
+    }
+  }, [perfilId]);
+
+  /** Confirma (Commit) a transação pendente. */
+  const confirmar = useCallback(async () => {
+    if (!perfilId) return;
+    try {
+      const status = await confirmarTransacao(perfilId);
+      setEmTransacao(false);
+      setMensagemTransacao(status.message);
+    } catch (e: any) {
+      setMensagemErro(e?.message ?? String(e));
+    }
+  }, [perfilId]);
+
+  /** Desfaz (Rollback) a transação pendente. */
+  const desfazer = useCallback(async () => {
+    if (!perfilId) return;
+    try {
+      const status = await desfazerTransacao(perfilId);
+      setEmTransacao(false);
+      setMensagemTransacao(status.message);
+    } catch (e: any) {
+      setMensagemErro(e?.message ?? String(e));
+    }
+  }, [perfilId]);
+
+  /**
+   * Salva a edição de uma célula com `UPDATE ... WHERE <chave primária>`.
+   *
+   * Sem PK (ou sem a PK no resultado) a edição é bloqueada: um UPDATE sem
+   * WHERE alteraria a tabela inteira.
+   */
+  const salvarCelula = useCallback(async (bloco: BlocoResultado, linha: number, coluna: number, texto: string) => {
+    if (!perfilId || !bloco.tabela) return;
+    const nomesPk = bloco.chavePrimaria.filter((c) => bloco.resultado.columns.includes(c));
+    if (nomesPk.length !== bloco.chavePrimaria.length || bloco.chavePrimaria.length === 0) {
+      setMensagemErro(
+        "Edição bloqueada: inclua todas as colunas da chave primária no SELECT para poder editar com segurança.",
+      );
+      return;
+    }
+    const colunaNome = bloco.resultado.columns[coluna];
+    const where = nomesPk
+      .map((pk) => {
+        const indice = bloco.resultado.columns.indexOf(pk);
+        const valor = bloco.resultado.rows[linha][indice] ?? "";
+        return `${identificador(pk)} = ${literalSql(valor)}`;
+      })
+      .join(" AND ");
+    const sql = `UPDATE ${identificador(bloco.tabela)} SET ${identificador(colunaNome)} = ${literalSql(texto)} WHERE ${where}`;
+    try {
+      await executarConsulta(perfilId, sql);
+      setBlocos((prev) =>
+        prev.map((b) =>
+          b.id === bloco.id
+            ? {
+                ...b,
+                resultado: {
+                  ...b.resultado,
+                  rows: b.resultado.rows.map((l, i) =>
+                    i === linha ? l.map((c, j) => (j === coluna ? texto === "" ? null : texto : c)) : l,
+                  ),
+                },
+              }
+            : b,
+        ),
+      );
+      setMensagemTransacao(
+        emTransacao
+          ? "célula alterada — a alteração aguarda o Commit"
+          : "célula alterada (autocommit)",
+      );
+    } catch (e: any) {
+      setMensagemErro(e?.message ?? String(e));
+    }
+  }, [perfilId, emTransacao]);
 
   /** Exporta as linhas já carregadas do bloco em CSV (UTF-8 com BOM). */
   const exportarCsv = useCallback((bloco: BlocoResultado) => {
@@ -450,6 +570,31 @@ export default function SqlEditorPanel({ openTableRequest, escuro }: { openTable
             Cancelar
           </button>
         )}
+        <label style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.9rem" }}>
+          <input
+            type="checkbox"
+            checked={emTransacao}
+            onChange={(e) => void alternarTransacao(e.target.checked)}
+            disabled={!perfilId}
+          />
+          Transação manual
+        </label>
+        <button
+          type="button"
+          style={{ ...estilo.botao, borderColor: "#217a3b", color: "#217a3b" }}
+          onClick={() => void confirmar()}
+          disabled={!perfilId}
+        >
+          Commit
+        </button>
+        <button
+          type="button"
+          style={{ ...estilo.botao, borderColor: "#a4262c", color: "#a4262c" }}
+          onClick={() => void desfazer()}
+          disabled={!perfilId}
+        >
+          Rollback
+        </button>
         <button type="button" style={estilo.botao} onClick={() => void salvarAbaComoScript()} disabled={salvando}>
           {salvando ? "Salvando…" : "Salvar script"}
         </button>
@@ -459,6 +604,12 @@ export default function SqlEditorPanel({ openTableRequest, escuro }: { openTable
       </div>
 
       {mensagemErro && <div role="alert" style={estilo.erro}>{mensagemErro}</div>}
+      {mensagemTransacao && (
+        <div role="status" style={{ fontSize: "0.85rem", color: emTransacao ? "#8a5a00" : "#217a3b", marginBottom: "0.5rem" }}>
+          {mensagemTransacao}
+          {emTransacao && " — transação aberta"}
+        </div>
+      )}
 
       <div style={estilo.abas}>
         {abas.map((a) => (
@@ -527,6 +678,13 @@ export default function SqlEditorPanel({ openTableRequest, escuro }: { openTable
                       <button type="button" style={estilo.botao} onClick={() => exportarCsv(bloco)}>
                         Exportar CSV
                       </button>
+                      {bloco.tabela && (
+                        <span style={{ fontSize: "0.78rem", color: "#4a4d52" }}>
+                          {bloco.chavePrimaria.length > 0
+                            ? `duplo clique numa célula edita ${bloco.tabela}`
+                            : `${bloco.tabela} não tem chave primária — somente leitura`}
+                        </span>
+                      )}
                       {bloco.temMais && (
                         <button
                           type="button"
@@ -563,11 +721,53 @@ export default function SqlEditorPanel({ openTableRequest, escuro }: { openTable
                       <tbody>
                         {r.rows.map((row, ri) => (
                           <tr key={ri}>
-                            {row.map((cell, ci) => (
-                              <td key={ci} style={{ padding: "0.3rem", borderBottom: "1px solid #eee", whiteSpace: "nowrap" }}>
-                                {cell === null ? <em style={{ color: "#999" }}>NULL</em> : cell}
-                              </td>
-                            ))}
+                            {row.map((cell, ci) => {
+                              const editavel = Boolean(bloco.tabela && bloco.chavePrimaria.length > 0);
+                              const emEdicao = celulaEmEdicao?.bloco === bloco.id && celulaEmEdicao.linha === ri && celulaEmEdicao.coluna === ci;
+                              if (emEdicao) {
+                                return (
+                                  <td key={ci} style={{ padding: "0.2rem", borderBottom: "1px solid #eee" }}>
+                                    <input
+                                      autoFocus
+                                      value={valorEmEdicao}
+                                      onChange={(e) => setValorEmEdicao(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                          e.preventDefault();
+                                          const valor = valorEmEdicao;
+                                          setCelulaEmEdicao(null);
+                                          void salvarCelula(bloco, ri, ci, valor);
+                                        } else if (e.key === "Escape") {
+                                          e.preventDefault();
+                                          setCelulaEmEdicao(null);
+                                        }
+                                      }}
+                                      onBlur={() => {
+                                        const valor = valorEmEdicao;
+                                        setCelulaEmEdicao(null);
+                                        void salvarCelula(bloco, ri, ci, valor);
+                                      }}
+                                      style={{ width: "100%", minWidth: "6rem", padding: "0.2rem", border: "1px solid #1b5e9c", borderRadius: "4px" }}
+                                      aria-label={`Editar célula ${r.columns[ci]} da linha ${ri + 1}`}
+                                    />
+                                  </td>
+                                );
+                              }
+                              return (
+                                <td
+                                  key={ci}
+                                  style={{ padding: "0.3rem", borderBottom: "1px solid #eee", whiteSpace: "nowrap", cursor: editavel ? "cell" : "default" }}
+                                  onDoubleClick={() => {
+                                    if (!editavel) return;
+                                    setCelulaEmEdicao({ bloco: bloco.id, linha: ri, coluna: ci });
+                                    setValorEmEdicao(cell ?? "");
+                                  }}
+                                  title={editavel ? "Duplo clique para editar" : undefined}
+                                >
+                                  {cell === null ? <em style={{ color: "#999" }}>NULL</em> : cell}
+                                </td>
+                              );
+                            })}
                           </tr>
                         ))}
                       </tbody>
