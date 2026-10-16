@@ -73,7 +73,11 @@ fn app_health() -> AppHealth {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let caminho = app.path().app_data_dir().ok();
+            let caminho = app
+                .path()
+                .app_data_dir()
+                .ok()
+                .map(|dir| dir.join("studio.db"));
             let estado = AppState::montar(caminho.as_deref());
             for aviso in estado.avisos() {
                 eprintln!("[firebird-studio] {aviso}");
