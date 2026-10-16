@@ -8,6 +8,7 @@ pub mod catalogo;
 pub mod connections;
 pub mod dto;
 pub mod error;
+pub mod sql;
 
 pub use catalogo::catalog_get_node;
 pub use connections::{
@@ -15,3 +16,6 @@ pub use connections::{
     connection_save_profile, connection_test_profile,
 };
 pub use error::{CommandError, CommandErrorCode};
+pub use sql::{
+    history_clear, history_list, query_run, script_delete, script_get, script_list, script_save,
+};

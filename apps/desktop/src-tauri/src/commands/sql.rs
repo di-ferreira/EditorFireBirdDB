@@ -1,0 +1,246 @@
+//! Fronteira de comandos para o editor SQL (Spec 05, 06, 09 §histórico/scripts).
+
+use std::time::Instant;
+
+use crate::application::connection_manager::ConnectionManager;
+use crate::application::estado::AppState;
+use crate::commands::error::CommandError;
+use firebird_storage::{agora_iso8601, QueryHistoryEntry, SavedScript};
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryResultDto {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<Option<String>>>,
+    pub row_count: usize,
+    pub elapsed_ms: u128,
+    pub kind: String,
+    pub affected: Option<usize>,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedScriptDto {
+    pub id: String,
+    pub name: String,
+    pub content: String,
+    pub connection_profile_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryEntryDto {
+    pub id: String,
+    pub connection_profile_id: Option<String>,
+    pub query_text: String,
+    pub status: String,
+    pub duration_ms: Option<i64>,
+    pub rows_returned: Option<i64>,
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+    pub executed_at: String,
+    pub execution_mode: String,
+}
+
+impl From<firebird_storage::SavedScript> for SavedScriptDto {
+    fn from(s: firebird_storage::SavedScript) -> Self {
+        SavedScriptDto {
+            id: s.id,
+            name: s.name,
+            content: s.content,
+            connection_profile_id: s.connection_profile_id,
+            created_at: s.created_at,
+            updated_at: s.updated_at,
+        }
+    }
+}
+
+impl From<firebird_storage::QueryHistoryEntry> for HistoryEntryDto {
+    fn from(e: firebird_storage::QueryHistoryEntry) -> Self {
+        HistoryEntryDto {
+            id: e.id,
+            connection_profile_id: e.connection_profile_id,
+            query_text: e.query_text,
+            status: e.status,
+            duration_ms: e.duration_ms,
+            rows_returned: e.rows_returned,
+            error_code: e.error_code,
+            error_message: e.error_message,
+            executed_at: e.executed_at,
+            execution_mode: e.execution_mode,
+        }
+    }
+}
+
+fn erro_storage(e: firebird_storage::StorageError) -> CommandError {
+    CommandError::indisponivel(e.to_string())
+}
+
+#[tauri::command]
+pub fn query_run(
+    profile_id: String,
+    sql: String,
+    deps: tauri::State<'_, AppState>,
+) -> Result<QueryResultDto, CommandError> {
+    let manager: &ConnectionManager = deps.manager();
+    let trimmed = sql.trim().to_string();
+    let lower = trimmed.to_lowercase();
+    let is_query = lower.starts_with("select") || lower.starts_with("with");
+
+    let inicio = Instant::now();
+    let mut error_code: Option<String> = None;
+    let mut error_message: Option<String> = None;
+    let mut rows_returned: Option<i64> = None;
+
+    let result: Result<QueryResultDto, CommandError> = if is_query {
+        match manager.executar_no_adaptador_conectado(&profile_id, |adapter| {
+            adapter.query_rows_with_columns(&trimmed, &[]).map_err(|e| {
+                crate::application::connection_manager::ErroGerente::Conexao(e.to_string())
+            })
+        }) {
+            Ok((cols, rows)) => {
+                let rc = rows.len();
+                rows_returned = Some(rc as i64);
+                Ok(QueryResultDto {
+                    columns: if cols.is_empty() {
+                        (0..rows.first().map(|r| r.len()).unwrap_or(0))
+                            .map(|i| format!("COL{}", i))
+                            .collect()
+                    } else {
+                        cols
+                    },
+                    rows,
+                    row_count: rc,
+                    elapsed_ms: inicio.elapsed().as_millis(),
+                    kind: "rows".to_string(),
+                    affected: None,
+                    message: None,
+                })
+            }
+            Err(e) => {
+                error_code = Some("QueryError".to_string());
+                error_message = Some(e.to_string());
+                Err(CommandError::consulta(e.to_string()))
+            }
+        }
+    } else {
+        match manager.executar_no_adaptador_conectado(&profile_id, |adapter| {
+            adapter.execute(&trimmed, &[]).map_err(|e| {
+                crate::application::connection_manager::ErroGerente::Conexao(e.to_string())
+            })
+        }) {
+            Ok(n) => Ok(QueryResultDto {
+                columns: vec![],
+                rows: vec![],
+                row_count: 0,
+                elapsed_ms: inicio.elapsed().as_millis(),
+                kind: "affected".to_string(),
+                affected: Some(n),
+                message: None,
+            }),
+            Err(e) => {
+                error_code = Some("QueryError".to_string());
+                error_message = Some(e.to_string());
+                Err(CommandError::consulta(e.to_string()))
+            }
+        }
+    };
+
+    if deps.armazenamento_disponivel() {
+        let entry = QueryHistoryEntry {
+            id: crate::application::connection_manager::novo_id("hist"),
+            connection_profile_id: Some(profile_id.clone()),
+            query_text: trimmed.clone(),
+            status: if result.is_ok() {
+                "ok".to_string()
+            } else {
+                "erro".to_string()
+            },
+            duration_ms: Some(inicio.elapsed().as_millis() as i64),
+            rows_returned,
+            error_code,
+            error_message,
+            executed_at: agora_iso8601(),
+            execution_mode: "manual".to_string(),
+        };
+        let _ = deps.repos().add_history(&entry);
+    }
+
+    result
+}
+
+#[tauri::command]
+pub fn script_save(
+    id: Option<String>,
+    name: String,
+    content: String,
+    profile_id: Option<String>,
+    deps: tauri::State<'_, AppState>,
+) -> Result<SavedScriptDto, CommandError> {
+    deps.exigir_armazenamento()?;
+    let agora = agora_iso8601();
+    let existente = match &id {
+        Some(i) if !i.trim().is_empty() => deps.repos().get_script(i).map_err(erro_storage)?,
+        _ => None,
+    };
+    let script_id = match id.clone() {
+        Some(i) if !i.trim().is_empty() => i,
+        _ => crate::application::connection_manager::novo_id("script"),
+    };
+    let created_at = existente
+        .map(|s| s.created_at)
+        .unwrap_or_else(|| agora.clone());
+    let script = SavedScript {
+        id: script_id,
+        name,
+        content,
+        connection_profile_id: profile_id,
+        created_at,
+        updated_at: agora,
+    };
+    deps.repos().save_script(&script).map_err(erro_storage)?;
+    Ok(SavedScriptDto::from(script))
+}
+
+#[tauri::command]
+pub fn script_list(deps: tauri::State<'_, AppState>) -> Result<Vec<SavedScriptDto>, CommandError> {
+    deps.exigir_armazenamento()?;
+    let scripts = deps.repos().scripts().map_err(erro_storage)?;
+    Ok(scripts.into_iter().map(SavedScriptDto::from).collect())
+}
+
+#[tauri::command]
+pub fn script_get(
+    id: String,
+    deps: tauri::State<'_, AppState>,
+) -> Result<Option<SavedScriptDto>, CommandError> {
+    deps.exigir_armazenamento()?;
+    let script = deps.repos().get_script(&id).map_err(erro_storage)?;
+    Ok(script.map(SavedScriptDto::from))
+}
+
+#[tauri::command]
+pub fn script_delete(id: String, deps: tauri::State<'_, AppState>) -> Result<bool, CommandError> {
+    deps.exigir_armazenamento()?;
+    deps.repos().delete_script(&id).map_err(erro_storage)
+}
+
+#[tauri::command]
+pub fn history_list(
+    limit: Option<i64>,
+    deps: tauri::State<'_, AppState>,
+) -> Result<Vec<HistoryEntryDto>, CommandError> {
+    deps.exigir_armazenamento()?;
+    let limite = limit.unwrap_or(100).clamp(1, 1000) as usize;
+    let entradas = deps.repos().history(limite).map_err(erro_storage)?;
+    Ok(entradas.into_iter().map(HistoryEntryDto::from).collect())
+}
+
+#[tauri::command]
+pub fn history_clear(deps: tauri::State<'_, AppState>) -> Result<usize, CommandError> {
+    deps.exigir_armazenamento()?;
+    deps.repos().clear_history().map_err(erro_storage)
+}

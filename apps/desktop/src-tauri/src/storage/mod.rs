@@ -14,7 +14,10 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use firebird_domain::{ConnectionProfile, DadosPerfil, PersistedProfile, ProfileError};
-use firebird_storage::{ConnectionProfileRecord, ConnectionProfileRepository, Db, StorageError};
+use firebird_storage::{
+    ConnectionProfileRecord, ConnectionProfileRepository, Db, QueryHistoryRepository,
+    SavedScriptRepository, StorageError,
+};
 
 /// Banco local de metadados, seguro para compartilhar entre threads.
 pub struct BancoLocal {
@@ -98,19 +101,69 @@ pub type DadosDoPerfil = DadosPerfil;
 
 impl ConnectionProfileRepository for BancoLocal {
     fn save(&self, p: &ConnectionProfileRecord) -> Result<(), StorageError> {
-        self.db().save(p)
+        ConnectionProfileRepository::save(&*self.db(), p)
     }
 
     fn get(&self, id: &str) -> Result<Option<ConnectionProfileRecord>, StorageError> {
-        self.db().get(id)
+        ConnectionProfileRepository::get(&*self.db(), id)
     }
 
     fn list(&self) -> Result<Vec<ConnectionProfileRecord>, StorageError> {
-        self.db().list()
+        ConnectionProfileRepository::list(&*self.db())
     }
 
     fn delete(&self, id: &str) -> Result<bool, StorageError> {
-        self.db().delete(id)
+        ConnectionProfileRepository::delete(&*self.db(), id)
+    }
+}
+
+impl BancoLocal {
+    /// Grava uma entrada no histórico de consultas.
+    pub fn add_history(
+        &self,
+        e: &firebird_storage::QueryHistoryEntry,
+    ) -> Result<(), firebird_storage::StorageError> {
+        QueryHistoryRepository::add(&*self.db(), e)
+    }
+
+    /// Lista entradas recentes, da mais nova para a mais antiga (limite).
+    pub fn history(
+        &self,
+        limite: usize,
+    ) -> Result<Vec<firebird_storage::QueryHistoryEntry>, firebird_storage::StorageError> {
+        QueryHistoryRepository::list(&*self.db(), limite)
+    }
+
+    /// Apaga o histórico e devolve o total removido.
+    pub fn clear_history(&self) -> Result<usize, firebird_storage::StorageError> {
+        QueryHistoryRepository::clear(&*self.db())
+    }
+}
+
+impl BancoLocal {
+    /// Época: infelizmente `Db` expõe `SavedScriptRepository`; embrulhar manualmente.
+    pub fn save_script(
+        &self,
+        s: &firebird_storage::SavedScript,
+    ) -> Result<(), firebird_storage::StorageError> {
+        SavedScriptRepository::save(&*self.db(), s)
+    }
+
+    pub fn scripts(
+        &self,
+    ) -> Result<Vec<firebird_storage::SavedScript>, firebird_storage::StorageError> {
+        SavedScriptRepository::list(&*self.db())
+    }
+
+    pub fn get_script(
+        &self,
+        id: &str,
+    ) -> Result<Option<firebird_storage::SavedScript>, firebird_storage::StorageError> {
+        SavedScriptRepository::get(&*self.db(), id)
+    }
+
+    pub fn delete_script(&self, id: &str) -> Result<bool, firebird_storage::StorageError> {
+        ConnectionProfileRepository::delete(&*self.db(), id)
     }
 }
 

@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import ConnectionsPanel from "./features/connections/ConnectionsPanel";
 import DbExplorerPanel from "./features/db-explorer/DbExplorerPanel";
+import SqlEditorPanel from "./features/sql-editor/SqlEditorPanel";
 
 /**
  * Resposta do comando Rust `app_health` (src-tauri/src/lib.rs).
@@ -78,12 +79,13 @@ const estilos = {
 };
 
 /** Abas da janela principal (Spec 11 §3: navegação por teclado, foco visível). */
-type Aba = "saude" | "conexoes" | "explorador";
+type Aba = "saude" | "conexoes" | "explorador" | "sql";
 
 const ABAS: { id: Aba; rotulo: string }[] = [
   { id: "saude", rotulo: "Saúde" },
   { id: "conexoes", rotulo: "Conexões" },
   { id: "explorador", rotulo: "Explorador" },
+  { id: "sql", rotulo: "SQL" },
 ];
 
 /**
@@ -185,6 +187,16 @@ export default function App(): JSX.Element {
         >
           {/* Montado apenas quando a aba é aberta. */}
           {aba === "explorador" && <DbExplorerPanel />}
+        </div>
+
+        <div
+          role="tabpanel"
+          id="painel-sql"
+          aria-labelledby="aba-sql"
+          hidden={aba !== "sql"}
+        >
+          {/* Montado apenas quando a aba é aberta. */}
+          {aba === "sql" && <SqlEditorPanel />}
         </div>
       </div>
     </main>

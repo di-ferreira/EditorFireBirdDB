@@ -82,6 +82,15 @@ impl FirebirdAdapter for FakeAdapter {
         // O fake não simula contagem de linhas afetadas: regra casa → Ok(0).
         self.registrar_e_buscar(sql, params).map(|_| 0)
     }
+
+    fn query_rows_with_columns(
+        &mut self,
+        sql: &str,
+        params: &[Option<&str>],
+    ) -> Result<(Vec<String>, Vec<Vec<Option<String>>>), DomainError> {
+        let linhas = self.registrar_e_buscar(sql, params)?;
+        Ok((Vec::new(), linhas))
+    }
 }
 
 impl FakeAdapter {

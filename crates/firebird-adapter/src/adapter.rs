@@ -99,6 +99,18 @@ pub trait FirebirdAdapter {
     /// `-504 (Cursor is not open)`. `Execute::execute` do rsfbclient não faz
     /// fetch e contorna o bug; evidência (backtrace) no relatório da Task 4.
     fn execute(&mut self, sql: &str, params: &[Option<&str>]) -> Result<usize, DomainError>;
+
+    /// Executa `sql` com parâmetros e devolve **nomes das colunas** (quando a
+    /// primeira linha trouxer colunas) + linhas como texto ([`None`] para NULL).
+    ///
+    /// Quando o `SELECT` devolver **zero linhas**, a lista de nomes pode vir
+    /// vazia — o chamador deve então usar rótulos neutros (`COL0`, ...).
+    #[allow(clippy::type_complexity)]
+    fn query_rows_with_columns(
+        &mut self,
+        sql: &str,
+        params: &[Option<&str>],
+    ) -> Result<(Vec<String>, Vec<Vec<Option<String>>>), DomainError>;
 }
 
 /// Adapter concreto sobre o `rsfbclient` nativo com carregamento dinâmico da
@@ -167,6 +179,31 @@ impl FirebirdAdapter for RsFbClientAdapter {
             .query(sql, params_em_rsfb(params))
             .map_err(|e| crate::erro_driver(format!("{e}")))?;
         linhas_como_texto(rows)
+    }
+
+    fn query_rows_with_columns(
+        &mut self,
+        sql: &str,
+        params: &[Option<&str>],
+    ) -> Result<(Vec<String>, Vec<Vec<Option<String>>>), DomainError> {
+        let rows: Vec<Row> = self
+            .conn
+            .query(sql, params_em_rsfb(params))
+            .map_err(|e| crate::erro_driver(format!("{e}")))?;
+        let nomes = rows
+            .first()
+            .map(|row| row.cols.iter().map(|col| col.name.to_string()).collect())
+            .unwrap_or_default();
+        let linhas = rows
+            .into_iter()
+            .map(|row| {
+                (0..row.cols.len())
+                    .map(|i| row.get::<Option<String>>(i))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| crate::erro_driver(format!("{e}")))?;
+        Ok((nomes, linhas))
     }
 
     fn execute(&mut self, sql: &str, params: &[Option<&str>]) -> Result<usize, DomainError> {

@@ -41,6 +41,14 @@ pub struct CommandError {
 }
 
 impl CommandError {
+    /// Erro na execução de uma consulta SQL.
+    pub fn consulta(mensagem: impl std::fmt::Display) -> Self {
+        Self {
+            code: CommandErrorCode::QueryError,
+            message: redigir_segredo(&mensagem.to_string()),
+        }
+    }
+
     /// Erro de conexão (perfil inválido, ausente, cofre, falha do driver).
     pub fn conexao(mensagem: impl std::fmt::Display) -> Self {
         Self {

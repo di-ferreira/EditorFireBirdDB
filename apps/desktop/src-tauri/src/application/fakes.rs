@@ -45,6 +45,14 @@ impl FirebirdAdapter for AdaptadorDeTeste {
     fn execute(&mut self, _sql: &str, _params: &[Option<&str>]) -> Result<usize, DomainError> {
         Ok(0)
     }
+
+    fn query_rows_with_columns(
+        &mut self,
+        _sql: &str,
+        _params: &[Option<&str>],
+    ) -> Result<(Vec<String>, Vec<Vec<Option<String>>>), DomainError> {
+        Ok((vec![], vec![vec![Some("LINHA".to_string())]]))
+    }
 }
 
 /// Conector programável: sucesso com versão fixa, ou falha com a mensagem
