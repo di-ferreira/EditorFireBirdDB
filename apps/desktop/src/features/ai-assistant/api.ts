@@ -42,3 +42,23 @@ export async function apagarProvedor(id: string): Promise<boolean> {
 }
 
 export { normalizarErro };
+
+export type IaContextPreview = {
+  text: string;
+  relacoes: number;
+  relacoesOmitidas: number;
+  truncado: boolean;
+};
+
+/** Monta o contexto do schema **sem enviar nada** — só devolve o texto local. */
+export async function previewContexto(profileId: string): Promise<IaContextPreview> {
+  try { return await invoke<IaContextPreview>("ia_context_preview", { profileId }); }
+  catch (e) { throw normalizarErro(e); }
+}
+
+export type IaTemplate = { tarefa: string; rotulo: string; versao: number; instrucao: string };
+
+export async function listarTemplates(): Promise<IaTemplate[]> {
+  try { return await invoke<IaTemplate[]>("ia_template_list", {}); }
+  catch (e) { throw normalizarErro(e); }
+}

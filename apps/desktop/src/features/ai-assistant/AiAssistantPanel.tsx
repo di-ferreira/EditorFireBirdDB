@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useState, type JSX } from "react";
 
-import { apagarProvedor, listarProvedores, salvarProvedor, testarProvedor } from "./api";
+import {
+  apagarProvedor,
+  listarProvedores,
+  listarTemplates,
+  previewContexto,
+  salvarProvedor,
+  testarProvedor,
+  type IaContextPreview,
+  type IaTemplate,
+} from "./api";
+import { listarPerfis, consultarStatus } from "../connections/api";
+import type { ConnectionProfile, ConnectionStatusInfo } from "../connections/types";
 import type { ProvedorIaDto } from "./types";
 
 type Estado = "carregando" | "pronto" | "erro";
@@ -18,6 +29,12 @@ export default function AiAssistantPanel(): JSX.Element {
   const [provedores, setProvedores] = useState<ProvedorIaDto[]>([]);
   const [salvando, setSalvando] = useState(false);
   const [testandoId, setTestandoId] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<IaTemplate[]>([]);
+  const [perfis, setPerfis] = useState<ConnectionProfile[]>([]);
+  const [statusPorPerfil, setStatusPorPerfil] = useState<Record<string, ConnectionStatusInfo>>({});
+  const [perfilContexto, setPerfilContexto] = useState("");
+  const [contexto, setContexto] = useState<IaContextPreview | null>(null);
+  const [gerandoContexto, setGerandoContexto] = useState(false);
 
   const [form, setForm] = useState({
     id: "",
@@ -42,7 +59,34 @@ export default function AiAssistantPanel(): JSX.Element {
 
   useEffect(() => {
     void carregar();
+    void listarTemplates().then(setTemplates).catch(() => setTemplates([]));
+    void (async () => {
+      try {
+        const lista = await listarPerfis();
+        setPerfis(lista);
+        const status: Record<string, ConnectionStatusInfo> = {};
+        for (const p of lista) {
+          try { status[p.id] = await consultarStatus(p.id); } catch { /* ignora */ }
+        }
+        setStatusPorPerfil(status);
+        const conectado = lista.find((p) => status[p.id]?.status === "connected");
+        if (conectado) setPerfilContexto(conectado.id);
+      } catch { /* ignora */ }
+    })();
   }, [carregar]);
+
+  const gerarContexto = useCallback(async () => {
+    if (!perfilContexto) return;
+    setGerandoContexto(true);
+    setErro(null);
+    try {
+      setContexto(await previewContexto(perfilContexto));
+    } catch (e: any) {
+      setErro(e?.message ?? String(e));
+    } finally {
+      setGerandoContexto(false);
+    }
+  }, [perfilContexto]);
 
   const salvar = useCallback(async () => {
     setSalvando(true);
@@ -224,6 +268,81 @@ export default function AiAssistantPanel(): JSX.Element {
                     Remover
                   </button>
                 </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div style={estilos.cartao}>
+        <h3 style={{ marginTop: 0, fontSize: "1rem" }}>Contexto do schema (pré-visualização)</h3>
+        <div style={estilos.linha}>
+          <label style={estilos.rotulo}>
+            Conexão
+            <select
+              style={estilos.entrada}
+              value={perfilContexto}
+              onChange={(e) => setPerfilContexto(e.target.value)}
+            >
+              <option value="">— selecione —</option>
+              {perfis
+                .filter((p) => statusPorPerfil[p.id]?.status === "connected")
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            style={estilos.botaoPrimario}
+            onClick={() => void gerarContexto()}
+            disabled={gerandoContexto || perfilContexto === ""}
+          >
+            {gerandoContexto ? "Montando…" : "Pré-visualizar contexto"}
+          </button>
+        </div>
+        {contexto && (
+          <>
+            <p style={{ margin: "0.25rem 0", fontSize: "0.85rem", color: "#4a4d52" }}>
+              {contexto.relacoes} relação(ões)
+              {contexto.relacoesOmitidas > 0 && ` · ${contexto.relacoesOmitidas} omitida(s) pelo limite`}
+              {contexto.truncado && " · contexto truncado"}
+            </p>
+            <pre
+              style={{
+                margin: 0,
+                maxHeight: "18rem",
+                overflow: "auto",
+                background: "#f4f5f7",
+                border: "1px solid #d9dce1",
+                borderRadius: "4px",
+                padding: "0.6rem",
+                fontSize: "0.8rem",
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {contexto.text}
+            </pre>
+            <p style={{ fontSize: "0.8rem", color: "#4a4d52" }}>
+              Este comando <strong>não envia nada</strong>: é só o texto que iria ao provedor, com
+              apenas metadados (nomes, tipos e chaves) — nunca dados das tabelas.
+            </p>
+          </>
+        )}
+      </div>
+
+      <div style={estilos.cartao}>
+        <h3 style={{ marginTop: 0, fontSize: "1rem" }}>Templates de prompt (versionados)</h3>
+        {templates.length === 0 ? (
+          <p role="status" style={{ margin: 0, color: "#4a4d52" }}>Carregando templates…</p>
+        ) : (
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {templates.map((t) => (
+              <li key={t.tarefa} style={{ borderBottom: "1px solid #eee", padding: "0.4rem 0" }}>
+                <strong>{t.rotulo}</strong> <span style={{ fontSize: "0.75rem" }}>v{t.versao}</span>
+                <div style={{ fontSize: "0.85rem", color: "#4a4d52" }}>{t.instrucao}</div>
               </li>
             ))}
           </ul>

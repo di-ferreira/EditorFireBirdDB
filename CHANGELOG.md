@@ -126,6 +126,15 @@ Baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
     contexto a provedor não-local.
   - UI `features/ai-assistant` (aba "IA"): listar, criar, editar, testar e remover
     provedor, com pt-BR e estados.
+- **Fase 3 — Passo 2: contexto do schema e templates versionados**:
+  - `ContextoBuilder` monta o contexto só de metadados (relações, colunas, tipos,
+    nullability e PK), com tetos de relações/colunas/caracteres e sinalização de
+    `truncado` — nenhum valor de dado entra no prompt.
+  - Templates versionados (`VERSAO_TEMPLATES = 1`) para gerar/explicar/corrigir/revisar,
+    com montagem de prompt (`montar_prompt`) e regra fixa de segurança.
+  - Comandos `ia_context_preview` (devolve o texto **sem enviar nada**) e
+    `ia_template_list`; UI na aba IA com perfil conectado, pré-visualização do
+    contexto e lista de templates com versão.
 - Estrutura inicial do repositório (monorepo pnpm + workspace Cargo Rust).
 - Especificação técnica extraída por tema em `docs/specs/` (17 documentos, do documento
   original v0.1 preservado em `docs/original/`).

@@ -113,3 +113,77 @@ pub fn ia_provider_delete(
         .apagar(&id)
         .map_err(|e| CommandError::provedor(e.to_string()))
 }
+
+/// Pré-visualização do contexto que **seria** enviado ao provedor.
+///
+/// Nada sai da máquina neste comando: ele só mostra o texto, para o usuário
+/// decidir (consentimento do Passo 4).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IaContextPreviewDto {
+    pub text: String,
+    pub relacoes: usize,
+    pub relacoes_omitidas: usize,
+    pub truncado: bool,
+}
+
+/// Monta o contexto do schema de um perfil conectado.
+#[tauri::command]
+pub fn ia_context_preview(
+    profile_id: String,
+    deps: tauri::State<'_, AppState>,
+) -> Result<IaContextPreviewDto, CommandError> {
+    let manager: &crate::application::connection_manager::ConnectionManager = deps.manager();
+    let contexto = manager
+        .executar_no_adaptador_conectado(&profile_id, |adapter| {
+            use crate::application::ia_context::ContextoBuilder;
+            let versao = adapter.server_version().map_err(|e| {
+                crate::application::connection_manager::ErroGerente::Conexao(e.to_string())
+            })?;
+            ContextoBuilder::default()
+                .construir(&mut **adapter, &versao)
+                .map_err(|e| {
+                    crate::application::connection_manager::ErroGerente::Conexao(e.to_string())
+                })
+        })
+        .map_err(|e| CommandError::provedor(e.to_string()))?;
+
+    Ok(IaContextPreviewDto {
+        text: contexto.texto,
+        relacoes: contexto.relacoes,
+        relacoes_omitidas: contexto.relacoes_omitidas,
+        truncado: contexto.truncado,
+    })
+}
+
+/// Um template de prompt disponível, com a versão vigente.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IaTemplateDto {
+    pub tarefa: String,
+    pub rotulo: String,
+    pub versao: u32,
+    pub instrucao: String,
+}
+
+/// Lista os templates versionados de prompt (geração, explicação, correção,
+/// revisão) — nenhum envia contexto, apenas descreve o prompt.
+#[tauri::command]
+pub fn ia_template_list() -> Result<Vec<IaTemplateDto>, CommandError> {
+    use crate::application::ia_context::templates;
+    Ok(templates()
+        .iter()
+        .map(|t| IaTemplateDto {
+            tarefa: t.tarefa.as_str().to_string(),
+            rotulo: match t.tarefa {
+                firebird_domain::TarefaIa::GerarSql => "Gerar SQL",
+                firebird_domain::TarefaIa::ExplicarSql => "Explicar SQL",
+                firebird_domain::TarefaIa::CorrigirSql => "Corrigir SQL",
+                firebird_domain::TarefaIa::RevisarSql => "Revisar SQL",
+            }
+            .to_string(),
+            versao: t.versao,
+            instrucao: t.instrucao.to_string(),
+        })
+        .collect())
+}

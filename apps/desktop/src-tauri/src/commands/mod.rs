@@ -18,7 +18,8 @@ pub use connections::{
 };
 pub use error::{CommandError, CommandErrorCode};
 pub use ia::{
-    ia_provider_delete, ia_provider_list, ia_provider_save, ia_provider_test, ProvedorIaDto,
+    ia_context_preview, ia_provider_delete, ia_provider_list, ia_provider_save, ia_provider_test,
+    ia_template_list, IaContextPreviewDto, IaTemplateDto, ProvedorIaDto,
 };
 pub use sql::{
     history_clear, history_list, query_cancel, query_run, script_delete, script_get, script_list,

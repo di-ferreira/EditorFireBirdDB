@@ -8,6 +8,7 @@
 pub mod connection_manager;
 pub mod estado;
 pub mod ia;
+pub mod ia_context;
 pub mod ia_service;
 
 #[cfg(test)]
