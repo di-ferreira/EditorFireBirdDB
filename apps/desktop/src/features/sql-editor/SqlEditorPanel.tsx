@@ -118,6 +118,7 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
   const [objetos, setObjetos] = useState<{ nome: string; kind: string }[]>([]);
   const [carregandoObjetos, setCarregandoObjetos] = useState(false);
   const [visibleRows, setVisibleRows] = useState(100);
+  const [escuro, setEscuro] = useState<boolean>(() => (typeof window !== "undefined" && window.localStorage.getItem("fb-tema") === "escuro"));
 
   const carregarObjetos = useCallback(async (perfil: string) => {
     if (!perfil) { setObjetos([]); return; }
@@ -159,6 +160,7 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
   }, [perfilId]);
 
   useEffect(() => { void carregarPerfis(); }, [carregarPerfis]);
+  useEffect(() => { window.localStorage.setItem("fb-tema", escuro ? "escuro" : "claro"); }, [escuro]);
   useEffect(() => { void carregarObjetos(perfilId); }, [perfilId, carregarObjetos]);
 
   const aba = abas.find((a) => a.id === abaAtiva) ?? abas[0];
@@ -308,7 +310,18 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
   };
 
   return (
-    <section style={estilo.raiz}>
+    <>
+      {escuro && (
+        <style>{`
+.dark-mode, .dark-mode * { color: #e8eaed; }
+.dark-mode [style*="background: #fff"], .dark-mode [style*="background: #ffffff"] { background: #1b1f26 !important; }
+.dark-mode [style*="border"] { border-color: #3b4048 !important; }
+.dark-mode input, .dark-mode select, .dark-mode button, .dark-mode textarea { background: #23272f !important; color: #e8eaed !important; border-color: #3b4048 !important; }
+.dark-mode .cm-editor, .dark-mode .cm-gutters { background: #1b1f26 !important; color: #e8eaed !important; }
+.dark-mode .cm-content { color: #e8eaed !important; }
+`}</style>
+      )}
+    <section style={{ ...estilo.raiz, background: escuro ? "#121417" : "#f7f8fa", color: escuro ? "#e8eaed" : "#1c1e21" }} className={escuro ? "dark-mode" : "light-mode"}>
       <div style={estilo.topo}>
         <label>
           Conexão:
@@ -329,6 +342,9 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
         </button>
         <button type="button" style={estilo.botao} onClick={() => novaAba()}>
           Nova aba
+        </button>
+        <button type="button" style={estilo.botao} onClick={() => setEscuro((v) => !v)}>
+          {escuro ? "☀️" : "🌙"} Tema
         </button>
       </div>
 
@@ -394,7 +410,15 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
                   : `${r.rowCount} linhas · ${r.elapsedMs} ms`}
               </div>
               {r.kind === "rows" && (
-                <div style={{ overflowY: "auto", maxHeight: "45vh", border: "1px solid #d9dce1", borderRadius: "6px" }}>
+                <div
+                  style={{ overflowY: "auto", maxHeight: "45vh", border: "1px solid #d9dce1", borderRadius: "6px" }}
+                  onScroll={(e) => {
+                    const el = e.currentTarget;
+                    if (el.scrollHeight - el.scrollTop - el.clientHeight < 96) {
+                      setVisibleRows((prev) => Math.min(prev + 100, r.rowCount));
+                    }
+                  }}
+                >
                   <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.9rem" }}>
                     <thead>
                       <tr>
@@ -433,5 +457,6 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
 
       </div>
     </section>
+    </>
   );
 }
