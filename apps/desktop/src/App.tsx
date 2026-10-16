@@ -95,6 +95,7 @@ const ABAS: { id: Aba; rotulo: string }[] = [
  */
 export default function App(): JSX.Element {
   const [aba, setAba] = useState<Aba>("saude");
+  const [pendingOpenTable, setPendingOpenTable] = useState<{ perfilId: string; table: string; nonce: number } | null>(null);
   const [estado, setEstado] = useState<Estado>({ fase: "carregando" });
 
   const carregarSaude = useCallback(async () => {
@@ -186,7 +187,7 @@ export default function App(): JSX.Element {
           hidden={aba !== "explorador"}
         >
           {/* Montado apenas quando a aba é aberta. */}
-          {aba === "explorador" && <DbExplorerPanel />}
+          {aba === "explorador" && <DbExplorerPanel onOpenTable={(perfilId, relacao) => { setAba("sql"); setPendingOpenTable({ perfilId, table: relacao, nonce: Date.now() }); }} />}
         </div>
 
         <div
@@ -198,10 +199,10 @@ export default function App(): JSX.Element {
           {aba === "sql" && (
             <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: "1rem", alignItems: "start" }}>
               <div style={{ overflow: "auto", maxHeight: "70vh" }}>
-                <DbExplorerPanel />
+                <DbExplorerPanel onOpenTable={(perfilId, relacao) => { setAba("sql"); setPendingOpenTable({ perfilId, table: relacao, nonce: Date.now() }); }} />
               </div>
               <div style={{ minWidth: 0 }}>
-                <SqlEditorPanel />
+                <SqlEditorPanel openTableRequest={pendingOpenTable} />
               </div>
             </div>
           )}

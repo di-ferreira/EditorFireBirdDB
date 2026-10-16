@@ -107,7 +107,7 @@ const splitStatements = (sql: string): string[] => {
   return out;
 };
 
-export default function SqlEditorPanel(): JSX.Element {
+export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?: { perfilId: string; table: string; nonce: number } | null } = {}): JSX.Element {
   const [perfilId, setPerfilId] = useState<string>("");
   const [perfis, setPerfis] = useState<ConnectionProfile[]>([]);
   const [statusPorPerfil, setStatusPorPerfil] = useState<Record<string, ConnectionStatusInfo>>({});
@@ -121,6 +121,7 @@ export default function SqlEditorPanel(): JSX.Element {
   const [historico, setHistorico] = useState<HistoryEntryDto[]>([]);
   const [salvando, setSalvando] = useState<boolean>(false);
   const viewRef = useRef<EditorView | null>(null);
+  const executarRef = useRef<(() => Promise<void>) | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const carregarPerfis = useCallback(async () => {
@@ -151,6 +152,10 @@ export default function SqlEditorPanel(): JSX.Element {
           sql(),
           EditorView.lineWrapping,
           cmKeymap.of(defaultKeymap),
+          cmKeymap.of([
+            { key: "Ctrl-Enter", run: () => { void executarRef.current?.(); return true; }, preventDefault: true },
+            { key: "Mod-s", run: () => { void salvarAbaComoScript(); return true; }, preventDefault: true },
+          ]),
         ],
       }),
     });
@@ -169,6 +174,16 @@ export default function SqlEditorPanel(): JSX.Element {
     const texto = lerConteudo();
     setAbas((prev) => prev.map((a) => (a.id === abaAtiva ? { ...a, content: texto } : a)));
   };
+
+  useEffect(() => {
+    if (!openTableRequest) return;
+    if (!openTableRequest.perfilId) return;
+    setPerfilId(openTableRequest.perfilId);
+    const id = novoid();
+    setAbas((prev) => [...prev, { id, title: `Dados: ${openTableRequest.table}`, content: `SELECT FIRST 500 * FROM ${openTableRequest.table}` }]);
+    setAbaAtiva(id);
+    setTimeout(() => { void executarRef.current?.(); }, 120);
+  }, [openTableRequest?.nonce]);
 
   const executar = useCallback(async () => {
     atualizarAbaConteudo();
@@ -192,6 +207,7 @@ export default function SqlEditorPanel(): JSX.Element {
       setExecutando(false);
     }
   }, [perfilId, abaAtiva]);
+  useEffect(() => { executarRef.current = executar; }, [executar]);
 
   const novaAba = () => {
     const id = novoid();

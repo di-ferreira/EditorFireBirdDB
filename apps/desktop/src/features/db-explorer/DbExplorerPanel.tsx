@@ -45,9 +45,10 @@ type TreeNodeProps = {
   filtro: string;
   nivel: number;
   onMensagem: (m: string) => void;
+  onAbrirTabela?: (perfilId: string, relacao: string) => void;
 };
 
-function TreeNode({ node: nodeInicial, perfilId, incluirSistema, filtro, nivel, onMensagem }: TreeNodeProps): JSX.Element {
+function TreeNode({ node: nodeInicial, perfilId, incluirSistema, filtro, nivel, onMensagem, onAbrirTabela }: TreeNodeProps): JSX.Element {
   const [node, setNode] = useState<CatalogNodeDto>(nodeInicial);
   const [expandido, setExpandido] = useState(false);
   const [carregando, setCarregando] = useState(false);
@@ -119,6 +120,17 @@ function TreeNode({ node: nodeInicial, perfilId, incluirSistema, filtro, nivel, 
         data-level={nivel}
         tabIndex={0}
         style={estilos.item}
+        onDoubleClick={() => {
+          const rel = node.label.trim();
+          const req = node.request;
+          if (!onAbrirTabela) return;
+          if (req?.kind === "campos" || req?.kind === "relacao" || node.kind === "object") {
+            // apenas tabelas/views (não colunas individuais)
+            if (req?.kind === "campos" || req?.kind === "relacao") {
+              onAbrirTabela(perfilId, rel);
+            }
+          }
+        }}
       >
         {temFilhosProvaveis && (
           <button
@@ -196,7 +208,7 @@ function TreeNode({ node: nodeInicial, perfilId, incluirSistema, filtro, nivel, 
   );
 }
 
-export default function DbExplorerPanel(): JSX.Element {
+export default function DbExplorerPanel({ onOpenTable }: { onOpenTable?: (perfilId: string, relacao: string) => void } = {}): JSX.Element {
   const [perfis, setPerfis] = useState<PerfilConectado[]>([]);
   const [carregandoPerfis, setCarregandoPerfis] = useState(true);
   const [erroPerfis, setErroPerfis] = useState<CommandError | null>(null);
@@ -472,6 +484,7 @@ export default function DbExplorerPanel(): JSX.Element {
                       filtro={buscaAplicada}
                       nivel={1}
                       onMensagem={setMensagem}
+                      onAbrirTabela={onOpenTable}
                     />
                   ))
                 : (
@@ -483,6 +496,7 @@ export default function DbExplorerPanel(): JSX.Element {
                       filtro={buscaAplicada}
                       nivel={1}
                       onMensagem={setMensagem}
+                      onAbrirTabela={onOpenTable}
                     />
                   )}
               {raiz.children && raiz.children.length === 0 && (
