@@ -13,8 +13,12 @@
       {
         "label": "main",
         "title": "Firebird Studio Linux",
-        "width": 1024,
-        "height": 720
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 640,
+        "resizable": true,
+        "fullscreen": false
       }
     ],
     "security": {
@@ -22,7 +26,28 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": "all"
+    "active": true,
+    "targets": [
+      "deb"
+    ],
+    "category": "Development",
+    "shortDescription": "IDE desktop open source para Firebird",
+    "longDescription": "Firebird Studio Linux conecta a servidores Firebird 2.5 a 5.0, explora o catalogo, edita e executa SQL com paginacao no servidor, edita dados com confirmacao por chave primaria e oferece assistente de IA com contexto do esquema.",
+    "licenseFile": "../../../LICENSE",
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libssl3",
+          "ca-certificates"
+        ],
+        "recommends": [
+          "libfbclient2",
+          "firebird3.0-client-common"
+        ],
+        "desktopTemplate": null
+      }
+    }
   }
 }
