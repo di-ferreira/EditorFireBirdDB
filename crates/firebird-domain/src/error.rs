@@ -22,6 +22,10 @@ pub enum DomainError {
     /// Erro na consulta de catálogo (`RDB$...`).
     #[error("erro de catálogo: {message}")]
     Catalog { message: String },
+
+    /// Consulta interrompida por cancelamento explícito do usuário.
+    #[error("consulta cancelada pelo usuário")]
+    Cancelled,
 }
 
 impl std::fmt::Debug for DomainError {
@@ -31,6 +35,7 @@ impl std::fmt::Debug for DomainError {
             DomainError::ParseVersion { .. } => "ParseVersion",
             DomainError::Driver { .. } => "Driver",
             DomainError::Catalog { .. } => "Catalog",
+            DomainError::Cancelled => "Cancelled",
         };
         write!(f, "{variante}({})", redact_secrets(&self.to_string()))
     }

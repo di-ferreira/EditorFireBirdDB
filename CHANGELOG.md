@@ -77,6 +77,19 @@ Baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
   - Correções de inicialização: SQLite em `app_data_dir/studio.db` (o caminho cru
     quebrava a abertura) e remoção de `devUrl` para o binário release carregar os
     assets locais.
+- **Paginação no servidor, cancelamento e exportação CSV**:
+  - `DomainError::Cancelled` + `CommandErrorCode::Cancelled` (cancelamento não é falha).
+  - `FirebirdAdapter::query_page_with_columns`: embrulha o `SELECT` com
+    `ROWS <offset+1> TO <offset+limit+1>` e lê linha a linha checando a bandeira de
+    cancelamento; fallback executa e fatia localmente quando o SQL não pode ser
+    subconsulta.
+  - Registro de cancelamento por `queryId` no `AppState`
+    (`registrar_cancelamento`/`encerrar_cancelamento`/`cancelar`), comando
+    `query_cancel`, e `query_run` estendido com `queryId`/`offset`/`limit`
+    (parâmetros opcionais: quem não envia mantém o comportamento anterior).
+  - Grade consome páginas de 100 linhas ao chegar ao fim do scroll, com botão
+    **Carregar mais** e **Exportar CSV** (UTF-8 com BOM, `;` e aspas duplicadas).
+  - CSP ampliada para `blob:` (download do CSV).
 - Estrutura inicial do repositório (monorepo pnpm + workspace Cargo Rust).
 - Especificação técnica extraída por tema em `docs/specs/` (17 documentos, do documento
   original v0.1 preservado em `docs/original/`).

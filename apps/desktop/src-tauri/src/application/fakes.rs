@@ -4,6 +4,7 @@
 //! aplicação e dos comandos Tauri: o [`ConectorFalso`] devolve um
 //! [`AdaptadorDeTeste`] sintético ou um erro do driver, e registra os
 //! [`ConnParams`] recebidos — cujo `Debug` já redige a senha (FR-016).
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -52,6 +53,22 @@ impl FirebirdAdapter for AdaptadorDeTeste {
         _params: &[Option<&str>],
     ) -> Result<(Vec<String>, Vec<Vec<Option<String>>>), DomainError> {
         Ok((vec![], vec![vec![Some("LINHA".to_string())]]))
+    }
+
+    fn query_page_with_columns(
+        &mut self,
+        _sql: &str,
+        _params: &[Option<&str>],
+        _offset: usize,
+        limit: usize,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<(Vec<String>, Vec<Vec<Option<String>>>, bool), DomainError> {
+        if let Some(flag) = cancel {
+            if flag.load(Ordering::Relaxed) {
+                return Err(DomainError::Cancelled);
+            }
+        }
+        Ok((vec![], vec![vec![Some("LINHA".to_string())]], limit == 0))
     }
 }
 

@@ -6,8 +6,10 @@
 //! acionável e os comandos devolvem `CommandError` explicando o que fazer —
 //! nunca `panic!` no startup e nunca um "sucesso" falso (Spec 03 §2).
 
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 
 use firebird_adapter::ClientLibrary;
 use firebird_security::{KeyringSecretStore, SecretStore};
@@ -29,6 +31,8 @@ pub struct AppState {
     armazenamento_disponivel: bool,
     /// `false` quando o cofre do sistema operacional não respondeu.
     cofre_disponivel: bool,
+    /// Consultas em execução que podem ser canceladas por `queryId`.
+    cancelamentos: Mutex<HashMap<String, Arc<AtomicBool>>>,
     /// Avisos de degradação, prontos para exibição.
     avisos: Vec<String>,
     /// Biblioteca cliente escolhida no boot (quando há mais de uma).
@@ -96,6 +100,7 @@ impl AppState {
             armazenamento_disponivel,
             cofre_disponivel,
             avisos,
+            cancelamentos: Mutex::new(HashMap::new()),
             biblioteca_escolhida: melhor_biblioteca(),
         }
     }
@@ -131,6 +136,7 @@ impl AppState {
             armazenamento_disponivel: true,
             cofre_disponivel,
             avisos: Vec::new(),
+            cancelamentos: Mutex::new(HashMap::new()),
             biblioteca_escolhida: melhor_biblioteca(),
         }
     }
@@ -168,6 +174,42 @@ impl AppState {
     /// Avisos de degradação acumulados no boot.
     pub fn avisos(&self) -> &[String] {
         &self.avisos
+    }
+
+    /// Registra uma consulta em execução e devolve a bandeira de cancelamento.
+    ///
+    /// A entrada é removida quando a consulta termina (sucesso ou erro), então
+    /// o mapa só guarda consultas de fato em voo.
+    pub fn registrar_cancelamento(&self, query_id: &str) -> Arc<AtomicBool> {
+        let bandeira = Arc::new(AtomicBool::new(false));
+        if let Ok(mut mapa) = self.cancelamentos.lock() {
+            mapa.insert(query_id.to_string(), bandeira.clone());
+        }
+        bandeira
+    }
+
+    /// Remove a consulta do registro (fim da execução).
+    pub fn encerrar_cancelamento(&self, query_id: &str) {
+        if let Ok(mut mapa) = self.cancelamentos.lock() {
+            mapa.remove(query_id);
+        }
+    }
+
+    /// Pede o cancelamento de uma consulta em execução.
+    ///
+    /// Devolve `false` quando não há consulta viva com esse `queryId` — a UI
+    /// trata como "já terminou" em vez de erro.
+    pub fn cancelar(&self, query_id: &str) -> bool {
+        match self.cancelamentos.lock() {
+            Ok(mapa) => match mapa.get(query_id) {
+                Some(bandeira) => {
+                    bandeira.store(true, std::sync::atomic::Ordering::Relaxed);
+                    true
+                }
+                None => false,
+            },
+            Err(_) => false,
+        }
     }
 
     /// Falha se o armazenamento local não estiver disponível.
@@ -241,6 +283,26 @@ mod tests {
             Arc::new(InMemorySecretStore::new()),
             true,
         )
+    }
+
+    #[test]
+    fn cancelar_consulta_marca_a_bandeira_e_some_ao_encerrar() {
+        let estado = AppState::com_dependencias(
+            Arc::new(BancoLocal::em_memoria().expect("banco em memória")),
+            Arc::new(firebird_security::InMemorySecretStore::new()),
+            true,
+        );
+
+        let bandeira = estado.registrar_cancelamento("q-1");
+        assert!(!bandeira.load(std::sync::atomic::Ordering::Relaxed));
+        assert!(estado.cancelar("q-1"), "consulta viva deve ser cancelável");
+        assert!(bandeira.load(std::sync::atomic::Ordering::Relaxed));
+
+        estado.encerrar_cancelamento("q-1");
+        assert!(
+            !estado.cancelar("q-1"),
+            "consulta encerrada não existe mais"
+        );
     }
 
     #[test]

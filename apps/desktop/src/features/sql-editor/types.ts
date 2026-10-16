@@ -8,6 +8,8 @@ export type ApiQueryResult = {
   kind: "rows" | "affected";
   affected?: number;
   message?: string | null;
+  /** `true` quando existe mais linhas no servidor além desta janela. */
+  hasMore?: boolean;
 };
 
 export type SavedScriptDto = {

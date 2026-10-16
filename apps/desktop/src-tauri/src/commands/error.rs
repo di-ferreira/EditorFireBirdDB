@@ -23,6 +23,8 @@ pub enum CommandErrorCode {
     UnsupportedServerFeature,
     /// Falha na execução de uma consulta.
     QueryError,
+    /// Consulta interrompida por cancelamento explícito do usuário.
+    Cancelled,
     /// Operação negada (cofre bloqueado, permissão do servidor).
     PermissionDenied,
     /// Falha no provedor de IA.
@@ -41,6 +43,14 @@ pub struct CommandError {
 }
 
 impl CommandError {
+    /// Consulta cancelada pelo usuário (não é falha: o cancelamento funcionou).
+    pub fn cancelada() -> Self {
+        Self {
+            code: CommandErrorCode::Cancelled,
+            message: "consulta cancelada pelo usuário".to_string(),
+        }
+    }
+
     /// Erro na execução de uma consulta SQL.
     pub fn consulta(mensagem: impl std::fmt::Display) -> Self {
         Self {
@@ -158,6 +168,7 @@ impl From<DomainError> for CommandError {
         match erro {
             DomainError::Driver { message } => CommandError::conexao(message),
             DomainError::Catalog { message } => CommandError::conexao(message),
+            DomainError::Cancelled => CommandError::cancelada(),
             DomainError::ParseVersion { raw } => CommandError::desconhecido(format!(
                 "não foi possível interpretar a versão do servidor informada ({raw})"
             )),

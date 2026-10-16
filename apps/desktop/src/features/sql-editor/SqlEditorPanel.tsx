@@ -14,12 +14,27 @@ import { listarPerfis, consultarStatus } from "../connections/api";
 import { buscarNoNoCatalogo } from "../db-explorer/api";
 import type { ConnectionProfile, ConnectionStatusInfo } from "../connections/types";
 import {
+  cancelarConsulta,
   executarConsulta,
+  executarPagina,
   salvarScript,
 } from "./api";
 import type { ApiQueryResult, SqlTab } from "./types";
 
+/** Uma execução na grade, com o estado de paginação da consulta. */
+type BlocoResultado = {
+  id: string;
+  sql: string;
+  resultado: ApiQueryResult;
+  queryId: string;
+  temMais: boolean;
+  carregandoMais: boolean;
+};
+
 const novoid = () => Math.random().toString(36).slice(2, 10);
+
+/** Linhas por página (paginação no servidor + scroll progressivo). */
+const TAMANHO_PAGINA = 100;
 
 const splitStatements = (sql: string): string[] => {
   const out: string[] = [];
@@ -111,13 +126,12 @@ export default function SqlEditorPanel({ openTableRequest, escuro }: { openTable
   const [statusPorPerfil, setStatusPorPerfil] = useState<Record<string, ConnectionStatusInfo>>({});
   const [abas, setAbas] = useState<SqlTab[]>([{ id: novoid(), title: "Nova consulta", content: "" }]);
   const [abaAtiva, setAbaAtiva] = useState<string>(abas[0].id);
-  const [resultados, setResultados] = useState<ApiQueryResult[]>([]);
+  const [blocos, setBlocos] = useState<BlocoResultado[]>([]);
   const [mensagemErro, setMensagemErro] = useState<string | null>(null);
   const [executando, setExecutando] = useState<boolean>(false);
   const [objetosBusca, setObjetosBusca] = useState("");
   const [objetos, setObjetos] = useState<{ nome: string; kind: string }[]>([]);
   const [carregandoObjetos, setCarregandoObjetos] = useState(false);
-  const [visibleRows, setVisibleRows] = useState(100);
 
   const carregarObjetos = useCallback(async (perfil: string) => {
     if (!perfil) { setObjetos([]); return; }
@@ -248,33 +262,115 @@ export default function SqlEditorPanel({ openTableRequest, escuro }: { openTable
     const id = novoid();
     setAbas((prev) => [...prev, { id, title: `Dados: ${tabela}`, content: `SELECT FIRST 500 * FROM ${tabela}` }]);
     setAbaAtiva(id);
-    setVisibleRows(100);
     setTimeout(() => { void executarRef.current?.(); }, 150);
   }, [perfilId]);
 
+  const consultaAtivaRef = useRef<string | null>(null);
+
   const executar = useCallback(async () => {
-    setVisibleRows(100);
     atualizarAbaConteudo();
     if (!perfilId) { setMensagemErro("Selecione uma conexão ativa."); return; }
     const texto = lerConteudo();
-    const blocos = splitStatements(texto);
-    if (blocos.length === 0) return;
+    const instrucoes = splitStatements(texto);
+    if (instrucoes.length === 0) return;
     setExecutando(true);
     setMensagemErro(null);
-    setResultados([]);
+    setBlocos([]);
     try {
-      const saidas: ApiQueryResult[] = [];
-      for (const bloco of blocos) {
-        const r = await executarConsulta(perfilId, bloco);
-        saidas.push(r);
+      for (const instrucao of instrucoes) {
+        const ehConsulta = /^\s*(select|with)\b/i.test(instrucao);
+        if (ehConsulta) {
+          const queryId = novoid();
+          consultaAtivaRef.current = queryId;
+          const pagina = await executarPagina(perfilId, instrucao, queryId, 0, TAMANHO_PAGINA);
+          setBlocos((prev) => [
+            ...prev,
+            {
+              id: novoid(),
+              sql: instrucao,
+              resultado: pagina,
+              queryId,
+              temMais: pagina.hasMore ?? false,
+              carregandoMais: false,
+            },
+          ]);
+        } else {
+          const r = await executarConsulta(perfilId, instrucao);
+          setBlocos((prev) => [
+            ...prev,
+            { id: novoid(), sql: instrucao, resultado: r, queryId: "", temMais: false, carregandoMais: false },
+          ]);
+        }
       }
-      setResultados(saidas);
     } catch (e: any) {
       setMensagemErro(e?.message ? `${e.message}` : String(e));
     } finally {
+      consultaAtivaRef.current = null;
       setExecutando(false);
     }
   }, [perfilId, abaAtiva]);
+
+  /** Carrega a próxima janela de 100 linhas de um bloco com scroll. */
+  const carregarMais = useCallback(async (bloco: BlocoResultado) => {
+    if (!bloco.temMais || bloco.carregandoMais || !perfilId) return;
+    setBlocos((prev) =>
+      prev.map((b) => (b.id === bloco.id ? { ...b, carregandoMais: true } : b)),
+    );
+    try {
+      const pagina = await executarPagina(
+        perfilId,
+        bloco.sql,
+        bloco.queryId,
+        bloco.resultado.rows.length,
+        TAMANHO_PAGINA,
+      );
+      setBlocos((prev) =>
+        prev.map((b) =>
+          b.id === bloco.id
+            ? {
+                ...b,
+                resultado: {
+                  ...b.resultado,
+                  columns: pagina.columns.length > 0 ? pagina.columns : b.resultado.columns,
+                  rows: [...b.resultado.rows, ...pagina.rows],
+                  rowCount: pagina.rowCount,
+                  elapsedMs: b.resultado.elapsedMs + pagina.elapsedMs,
+                },
+                temMais: pagina.hasMore ?? false,
+                carregandoMais: false,
+              }
+            : b,
+        ),
+      );
+    } catch (e: any) {
+      setBlocos((prev) => prev.map((b) => (b.id === bloco.id ? { ...b, carregandoMais: false } : b)));
+      setMensagemErro(e?.message ? `${e.message}` : String(e));
+    }
+  }, [perfilId]);
+
+  /** Cancela a consulta em execução (cancelamento cooperativo no servidor). */
+  const cancelar = useCallback(async () => {
+    const queryId = consultaAtivaRef.current;
+    if (!queryId) return;
+    await cancelarConsulta(queryId).catch(() => false);
+  }, []);
+
+  /** Exporta as linhas já carregadas do bloco em CSV (UTF-8 com BOM). */
+  const exportarCsv = useCallback((bloco: BlocoResultado) => {
+    const escapar = (valor: string | null) =>
+      valor === null ? "" : `"${valor.replace(/"/g, '""')}"`;
+    const cabecalho = bloco.resultado.columns.map(escapar).join(";");
+    const corpo = bloco.resultado.rows.map((linha) => linha.map(escapar).join(";")).join("\r\n");
+    const conteudo = `\uFEFF${[cabecalho, corpo].filter(Boolean).join("\r\n")}`;
+    const blob = new Blob([conteudo], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "firebird-studio-resultado.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
   useEffect(() => { executarRef.current = executar; }, [executar]);
 
   const novaAba = () => {
@@ -349,6 +445,11 @@ export default function SqlEditorPanel({ openTableRequest, escuro }: { openTable
         <button type="button" style={estilo.botao} onClick={() => void executar()} disabled={executando}>
           {executando ? "Executando…" : "Executar"}
         </button>
+        {executando && (
+          <button type="button" style={{ ...estilo.botao, borderColor: "#a4262c", color: "#a4262c" }} onClick={() => void cancelar()}>
+            Cancelar
+          </button>
+        )}
         <button type="button" style={estilo.botao} onClick={() => void salvarAbaComoScript()} disabled={salvando}>
           {salvando ? "Salvando…" : "Salvar script"}
         </button>
@@ -411,56 +512,76 @@ export default function SqlEditorPanel({ openTableRequest, escuro }: { openTable
         </div>
         <div style={{ minWidth: 0 }}>
           <div ref={containerRef} style={estilo.editor} />
-          {resultados.map((r, idx) => (
-            <div key={idx} style={{ marginBottom: "1rem" }}>
-              <div style={{ fontSize: "0.85rem", color: "#4a4d52", marginBottom: "0.25rem" }}>
-                {r.kind === "affected"
-                  ? `Affected rows: ${r.affected ?? 0} · ${r.elapsedMs} ms`
-                  : `${r.rowCount} linhas · ${r.elapsedMs} ms`}
-              </div>
-              {r.kind === "rows" && (
-                <div
-                  style={{ overflowY: "auto", maxHeight: "45vh", border: "1px solid #d9dce1", borderRadius: "6px" }}
-                  onScroll={(e) => {
-                    const el = e.currentTarget;
-                    if (el.scrollHeight - el.scrollTop - el.clientHeight < 96) {
-                      setVisibleRows((prev) => Math.min(prev + 100, r.rowCount));
-                    }
-                  }}
-                >
-                  <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.9rem" }}>
-                    <thead>
-                      <tr>
-                        {r.columns.map((c, i) => (
-                          <th key={i} style={{ textAlign: "left", padding: "0.35rem", borderBottom: "1px solid #d9dce1", background: "#f0f1f4", whiteSpace: "nowrap" }}>
-                            {c}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {r.rows.slice(0, Math.min(visibleRows, r.rows.length)).map((row, ri) => (
-                        <tr key={ri}>
-                          {row.map((cell, ci) => (
-                            <td key={ci} style={{ padding: "0.3rem", borderBottom: "1px solid #eee", whiteSpace: "nowrap" }}>
-                              {cell === null ? <em style={{ color: "#999" }}>NULL</em> : cell}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {visibleRows < r.rowCount && (
-                    <div style={{ padding: "0.4rem", textAlign: "center" }}>
-                      <button type="button" style={estilo.botao} onClick={() => setVisibleRows((n) => n + 100)}>
-                        Mostrar mais ({r.rowCount - visibleRows} restantes)
+          {blocos.map((bloco) => {
+            const r = bloco.resultado;
+            return (
+              <div key={bloco.id} style={{ marginBottom: "1rem" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap", marginBottom: "0.25rem" }}>
+                  <span style={{ fontSize: "0.85rem", color: "#4a4d52" }}>
+                    {r.kind === "affected"
+                      ? `Affected rows: ${r.affected ?? 0} · ${r.elapsedMs} ms`
+                      : `${r.rows.length} carregadas${bloco.temMais ? " (há mais no servidor)" : ""} · ${r.elapsedMs} ms`}
+                  </span>
+                  {r.kind === "rows" && (
+                    <>
+                      <button type="button" style={estilo.botao} onClick={() => exportarCsv(bloco)}>
+                        Exportar CSV
                       </button>
-                    </div>
+                      {bloco.temMais && (
+                        <button
+                          type="button"
+                          style={estilo.botao}
+                          disabled={bloco.carregandoMais}
+                          onClick={() => void carregarMais(bloco)}
+                        >
+                          {bloco.carregandoMais ? "Carregando…" : "Carregar mais"}
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
-              )}
-            </div>
-          ))}
+                {r.kind === "rows" && (
+                  <div
+                    style={{ overflowY: "auto", maxHeight: "45vh", border: "1px solid #d9dce1", borderRadius: "6px" }}
+                    onScroll={(e) => {
+                      const el = e.currentTarget;
+                      if (bloco.temMais && el.scrollHeight - el.scrollTop - el.clientHeight < 96) {
+                        void carregarMais(bloco);
+                      }
+                    }}
+                  >
+                    <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.9rem" }}>
+                      <thead>
+                        <tr>
+                          {r.columns.map((c, i) => (
+                            <th key={i} style={{ textAlign: "left", padding: "0.35rem", borderBottom: "1px solid #d9dce1", background: "#f0f1f4", whiteSpace: "nowrap" }}>
+                              {c}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {r.rows.map((row, ri) => (
+                          <tr key={ri}>
+                            {row.map((cell, ci) => (
+                              <td key={ci} style={{ padding: "0.3rem", borderBottom: "1px solid #eee", whiteSpace: "nowrap" }}>
+                                {cell === null ? <em style={{ color: "#999" }}>NULL</em> : cell}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {bloco.carregandoMais && (
+                      <p role="status" style={{ padding: "0.4rem", fontSize: "0.8rem", color: "#4a4d52" }}>
+                        Buscando próxima página no servidor…
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
 
 

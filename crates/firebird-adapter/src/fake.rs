@@ -6,6 +6,8 @@
 //! marcador, e todo SQL executado fica registrado em
 //! [`FakeAdapter::executed_sqls`] para asserção da variante de catálogo.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use firebird_domain::{DomainError, ServerVersion};
 
 use crate::FirebirdAdapter;
@@ -90,6 +92,24 @@ impl FirebirdAdapter for FakeAdapter {
     ) -> Result<(Vec<String>, Vec<Vec<Option<String>>>), DomainError> {
         let linhas = self.registrar_e_buscar(sql, params)?;
         Ok((Vec::new(), linhas))
+    }
+
+    fn query_page_with_columns(
+        &mut self,
+        sql: &str,
+        params: &[Option<&str>],
+        offset: usize,
+        limit: usize,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<(Vec<String>, Vec<Vec<Option<String>>>, bool), DomainError> {
+        if let Some(flag) = cancel {
+            if flag.load(Ordering::Relaxed) {
+                return Err(DomainError::Cancelled);
+            }
+        }
+        let linhas = self.registrar_e_buscar(sql, params)?;
+        let (janela, tem_mais) = crate::adapter::fatiar(linhas, offset, limit);
+        Ok((Vec::new(), janela, tem_mais))
     }
 }
 

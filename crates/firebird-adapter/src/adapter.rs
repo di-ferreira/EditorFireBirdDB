@@ -7,6 +7,7 @@
 //! builder `with_dyn_load(...).charset(...)` na conexão.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use firebird_domain::{DomainError, ServerVersion};
 use rsfbclient::{Connection, Queryable, Row};
@@ -106,11 +107,32 @@ pub trait FirebirdAdapter {
     /// Quando o `SELECT` devolver **zero linhas**, a lista de nomes pode vir
     /// vazia — o chamador deve então usar rótulos neutros (`COL0`, ...).
     #[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity)]
     fn query_rows_with_columns(
         &mut self,
         sql: &str,
         params: &[Option<&str>],
     ) -> Result<(Vec<String>, Vec<Vec<Option<String>>>), DomainError>;
+
+    /// Executa um `SELECT` **paginado no servidor** (Spec 06).
+    ///
+    /// A instrução é envolvida por `ROWS <offset+1> TO <offset+limit+1>` para
+    /// que o servidor devolva apenas a janela pedida; uma linha extra é lida
+    /// para saber se existe mais. Se o servidor recusar o embrulho (SQL que não
+    /// pode ser subconsulta), a consulta é executada inteira e fatiada aqui.
+    ///
+    /// `cancel`, quando presente, é verificado a cada linha: se marcar
+    /// [`Cancelled`](firebird_domain::DomainError::Cancelled), o cursor é
+    /// liberado e a execução aborta sem trazer o restante do resultado.
+    #[allow(clippy::type_complexity)]
+    fn query_page_with_columns(
+        &mut self,
+        sql: &str,
+        params: &[Option<&str>],
+        offset: usize,
+        limit: usize,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<(Vec<String>, Vec<Vec<Option<String>>>, bool), DomainError>;
 }
 
 /// Adapter concreto sobre o `rsfbclient` nativo com carregamento dinâmico da
@@ -146,6 +168,44 @@ impl RsFbClientAdapter {
             .map_err(|e| crate::erro_driver(format!("{e}")))?;
 
         Ok(Self { conn })
+    }
+
+    /// Lê a janela paginada linha a linha, checando cancelamento por linha.
+    #[allow(clippy::type_complexity)]
+    fn paginar_streaming(
+        &mut self,
+        sql: &str,
+        params: &[Option<&str>],
+        limit: usize,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<(Vec<String>, Vec<Vec<Option<String>>>, bool), DomainError> {
+        let mut iter = self
+            .conn
+            .query_iter::<_, Row>(sql, params_em_rsfb(params))
+            .map_err(|e| crate::erro_driver(format!("{e}")))?;
+
+        let mut nomes: Vec<String> = Vec::new();
+        let mut linhas: Vec<Vec<Option<String>>> = Vec::new();
+        let mut tem_mais = false;
+
+        for item in iter.by_ref() {
+            if let Some(flag) = cancel {
+                if flag.load(Ordering::Relaxed) {
+                    return Err(DomainError::Cancelled);
+                }
+            }
+            let row = item.map_err(|e| crate::erro_driver(format!("{e}")))?;
+            if nomes.is_empty() {
+                nomes = nomes_das_colunas(Some(&row));
+            }
+            if linhas.len() == limit {
+                tem_mais = true;
+                break;
+            }
+            linhas.push(linha_como_texto(&row)?);
+        }
+
+        Ok((nomes, linhas, tem_mais))
     }
 }
 
@@ -206,6 +266,34 @@ impl FirebirdAdapter for RsFbClientAdapter {
         Ok((nomes, linhas))
     }
 
+    fn query_page_with_columns(
+        &mut self,
+        sql: &str,
+        params: &[Option<&str>],
+        offset: usize,
+        limit: usize,
+        cancel: Option<&AtomicBool>,
+    ) -> Result<(Vec<String>, Vec<Vec<Option<String>>>, bool), DomainError> {
+        if offset == 0 && limit == 0 {
+            return Ok((Vec::new(), Vec::new(), false));
+        }
+        let pagina = sql_com_rows(sql, offset + 1, offset + limit + 1);
+
+        // Caminho preferido: paginação no servidor, lendo linha a linha para
+        // poder abortar assim que o usuário cancelar.
+        match self.paginar_streaming(&pagina, params, limit, cancel) {
+            Ok((nomes, linhas, tem_mais)) => Ok((nomes, linhas, tem_mais)),
+            Err(DomainError::Cancelled) => Err(DomainError::Cancelled),
+            Err(_) => {
+                // SQL que não pode ser subconsulta (ou embrulho recusado):
+                // executa inteiro e fatia localmente.
+                let (nomes, linhas) = self.query_rows_with_columns(sql, params)?;
+                let (janela, tem_mais) = fatiar(linhas, offset, limit);
+                Ok((nomes, janela, tem_mais))
+            }
+        }
+    }
+
     fn execute(&mut self, sql: &str, params: &[Option<&str>]) -> Result<usize, DomainError> {
         // Caminho sem fetch (`Execute::execute`): obrigatório para DML/DDL
         // enquanto o bug de classificação do rsfbclient 0.29 nativo existir
@@ -230,21 +318,81 @@ fn params_em_rsfb(params: &[Option<&str>]) -> Vec<rsfbclient::SqlType> {
         .collect()
 }
 
+/// Converte uma linha bruta do rsfbclient em vetor de texto ([`None`] = NULL).
+fn linha_como_texto(row: &Row) -> Result<Vec<Option<String>>, DomainError> {
+    (0..row.cols.len())
+        .map(|i| row.get::<Option<String>>(i))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| crate::erro_driver(format!("{e}")))
+}
+
+/// Nomes das colunas da primeira linha (vazio quando não houver linhas).
+fn nomes_das_colunas(row: Option<&Row>) -> Vec<String> {
+    row.map(|r| r.cols.iter().map(|c| c.name.to_string()).collect())
+        .unwrap_or_default()
+}
+
 /// Converte linhas brutas do rsfbclient em texto ([`None`] para NULL).
 fn linhas_como_texto(rows: Vec<Row>) -> Result<Vec<Vec<Option<String>>>, DomainError> {
     rows.into_iter()
-        .map(|row| {
-            (0..row.cols.len())
-                .map(|i| row.get::<Option<String>>(i))
-                .collect::<Result<Vec<_>, _>>()
-        })
+        .map(|row| linha_como_texto(&row))
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| crate::erro_driver(format!("{e}")))
+}
+
+/// Embrulha um `SELECT` com `ROWS` para paginação no servidor.
+fn sql_com_rows(sql: &str, primeiro: usize, ultimo: usize) -> String {
+    format!(
+        "SELECT * FROM ({}) FSL_PAGINA_ROWS ROWS {primeiro} TO {ultimo}",
+        sql.trim().trim_end_matches(';')
+    )
+}
+
+/// Extrai uma janela de linhas de um resultado já materializado.
+pub fn fatiar(
+    linhas: Vec<Vec<Option<String>>>,
+    offset: usize,
+    limit: usize,
+) -> (Vec<Vec<Option<String>>>, bool) {
+    let fim = (offset + limit + 1).min(linhas.len());
+    let janela: Vec<Vec<Option<String>>> = linhas
+        .into_iter()
+        .skip(offset)
+        .take(fim.saturating_sub(offset))
+        .collect();
+    let tem_mais = janela.len() > limit;
+    (janela.into_iter().take(limit).collect(), tem_mais)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fatiar_devolve_janela_e_sinaliza_hay_mais() {
+        let linhas: Vec<Vec<Option<String>>> =
+            (1..=10).map(|i| vec![Some(i.to_string())]).collect();
+
+        let (janela, tem_mais) = fatiar(linhas.clone(), 0, 3);
+        assert_eq!(janela.len(), 3);
+        assert_eq!(janela[0][0], Some("1".to_string()));
+        assert!(tem_mais);
+
+        let (janela, tem_mais) = fatiar(linhas.clone(), 9, 3);
+        assert_eq!(janela.len(), 1);
+        assert!(!tem_mais);
+
+        let (janela, tem_mais) = fatiar(linhas, 20, 3);
+        assert!(janela.is_empty());
+        assert!(!tem_mais);
+    }
+
+    #[test]
+    fn sql_com_rows_envolve_select_com_janela() {
+        let sql = sql_com_rows("SELECT FIRST 10 A FROM T", 101, 201);
+        assert!(sql.contains("ROWS 101 TO 201"));
+        assert!(sql.starts_with("SELECT * FROM (SELECT FIRST 10 A FROM T)"));
+        assert!(!sql.trim_end().ends_with(";"));
+    }
 
     /// Parâmetros de exemplo com senha sintética (nunca dado real).
     fn params_de_exemplo() -> ConnParams {

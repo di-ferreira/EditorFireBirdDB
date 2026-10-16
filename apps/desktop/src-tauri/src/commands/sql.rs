@@ -17,6 +17,8 @@ pub struct QueryResultDto {
     pub kind: String,
     pub affected: Option<usize>,
     pub message: Option<String>,
+    /// `true` quando existe ao menos uma linha depois da janela devolvida.
+    pub has_more: Option<bool>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -83,6 +85,9 @@ fn erro_storage(e: firebird_storage::StorageError) -> CommandError {
 pub fn query_run(
     profile_id: String,
     sql: String,
+    query_id: Option<String>,
+    offset: Option<i64>,
+    limit: Option<i64>,
     deps: tauri::State<'_, AppState>,
 ) -> Result<QueryResultDto, CommandError> {
     let manager: &ConnectionManager = deps.manager();
@@ -94,6 +99,69 @@ pub fn query_run(
     let mut error_code: Option<String> = None;
     let mut error_message: Option<String> = None;
     let mut rows_returned: Option<i64> = None;
+
+    // Caminho paginado (SELECT/WITH): busca só a janela pedida no servidor e
+    // permite cancelamento cooperativo por linha.
+    if let Some(limit) = limit {
+        if !is_query {
+            return Err(CommandError::consulta(
+                "paginação só se aplica a consultas (SELECT/WITH); use Executar para DML/DDL",
+            ));
+        }
+        let limit = limit.clamp(1, 5_000) as usize;
+        let offset = offset.unwrap_or(0).max(0) as usize;
+        let query_id =
+            query_id.unwrap_or_else(|| crate::application::connection_manager::novo_id("q"));
+        let bandeira = deps.registrar_cancelamento(&query_id);
+        let bruto = trimmed.clone();
+        let resultado = manager.executar_no_adaptador_conectado(&profile_id, |adapter| {
+            adapter
+                .query_page_with_columns(&bruto, &[], offset, limit, Some(bandeira.as_ref()))
+                .map_err(|e| {
+                    crate::application::connection_manager::ErroGerente::Conexao(e.to_string())
+                })
+        });
+        deps.encerrar_cancelamento(&query_id);
+
+        return match resultado {
+            Ok((cols, rows, tem_mais)) => {
+                let total = offset + rows.len() + usize::from(tem_mais);
+                if deps.armazenamento_disponivel() && offset == 0 {
+                    let entry = QueryHistoryEntry {
+                        id: crate::application::connection_manager::novo_id("hist"),
+                        connection_profile_id: Some(profile_id.clone()),
+                        query_text: trimmed.clone(),
+                        status: "ok".to_string(),
+                        duration_ms: Some(inicio.elapsed().as_millis() as i64),
+                        rows_returned: Some(rows.len() as i64),
+                        error_code: None,
+                        error_message: None,
+                        executed_at: agora_iso8601(),
+                        execution_mode: "manual".to_string(),
+                    };
+                    let _ = deps.repos().add_history(&entry);
+                }
+                Ok(QueryResultDto {
+                    columns: if cols.is_empty() {
+                        (0..rows.first().map(|r| r.len()).unwrap_or(0))
+                            .map(|i| format!("COL{i}"))
+                            .collect()
+                    } else {
+                        cols
+                    },
+                    rows,
+                    row_count: total,
+                    elapsed_ms: inicio.elapsed().as_millis(),
+                    kind: "rows".to_string(),
+                    affected: None,
+                    message: None,
+                    has_more: Some(tem_mais),
+                })
+            }
+            Err(e) if e.to_string().contains("cancelada") => Err(CommandError::cancelada()),
+            Err(e) => Err(CommandError::consulta(e.to_string())),
+        };
+    }
 
     let result: Result<QueryResultDto, CommandError> = if is_query {
         match manager.executar_no_adaptador_conectado(&profile_id, |adapter| {
@@ -118,6 +186,7 @@ pub fn query_run(
                     kind: "rows".to_string(),
                     affected: None,
                     message: None,
+                    has_more: None,
                 })
             }
             Err(e) => {
@@ -140,6 +209,7 @@ pub fn query_run(
                 kind: "affected".to_string(),
                 affected: Some(n),
                 message: None,
+                has_more: Some(false),
             }),
             Err(e) => {
                 error_code = Some("QueryError".to_string());
@@ -243,4 +313,16 @@ pub fn history_list(
 pub fn history_clear(deps: tauri::State<'_, AppState>) -> Result<usize, CommandError> {
     deps.exigir_armazenamento()?;
     deps.repos().clear_history().map_err(erro_storage)
+}
+
+/// Pede o cancelamento de uma consulta em execução.
+///
+/// `true` quando havia uma consulta viva com esse `queryId`; `false` quando ela
+/// já terminou (a UI trata como "nada a cancelar", não como erro).
+#[tauri::command]
+pub fn query_cancel(
+    query_id: String,
+    deps: tauri::State<'_, AppState>,
+) -> Result<bool, CommandError> {
+    Ok(deps.cancelar(&query_id))
 }
