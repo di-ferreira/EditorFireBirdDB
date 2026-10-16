@@ -187,3 +187,133 @@ pub fn ia_template_list() -> Result<Vec<IaTemplateDto>, CommandError> {
         })
         .collect())
 }
+
+/// Resposta do assistente, pronta para a UI.
+///
+/// `sql` é **sugestão**: a UI só pode inseri-lo no editor, nunca executá-lo
+/// sozinha (Spec 07 §revisão).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IaGenerateDto {
+    pub texto: String,
+    pub sql: Option<String>,
+    pub modelo: String,
+    pub interaction_id: String,
+    pub contexto_relacoes: usize,
+    pub contexto_truncado: bool,
+    /// `true` quando o contexto foi enviado a um provedor remoto autorizado.
+    pub contexto_remoto: bool,
+}
+
+/// Executa uma tarefa de IA com o contexto do schema do perfil.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn ia_generate(
+    profile_id: String,
+    provider_profile_id: String,
+    task: String,
+    prompt: String,
+    deps: tauri::State<'_, AppState>,
+) -> Result<IaGenerateDto, CommandError> {
+    deps.exigir_armazenamento()?;
+    let tarefa = match task.as_str() {
+        "gerar_sql" => firebird_domain::TarefaIa::GerarSql,
+        "explicar_sql" => firebird_domain::TarefaIa::ExplicarSql,
+        "corrigir_sql" => firebird_domain::TarefaIa::CorrigirSql,
+        "revisar_sql" => firebird_domain::TarefaIa::RevisarSql,
+        outra => {
+            return Err(CommandError::consulta(format!(
+                "tarefa de IA desconhecida: {outra}"
+            )))
+        }
+    };
+
+    let manager: &crate::application::connection_manager::ConnectionManager = deps.manager();
+    let contexto = manager
+        .executar_no_adaptador_conectado(&profile_id, |adapter| {
+            use crate::application::ia_context::ContextoBuilder;
+            let versao = adapter.server_version().map_err(|e| {
+                crate::application::connection_manager::ErroGerente::Conexao(e.to_string())
+            })?;
+            ContextoBuilder::default()
+                .construir(&mut **adapter, &versao)
+                .map_err(|e| {
+                    crate::application::connection_manager::ErroGerente::Conexao(e.to_string())
+                })
+        })
+        .map_err(|e| CommandError::provedor(e.to_string()))?;
+
+    // Consentimento remoto é conferido antes de qualquer envio.
+    let remoto = servico(&deps)?
+        .listar()
+        .map_err(|e| CommandError::provedor(e.to_string()))?
+        .into_iter()
+        .find(|p| p.id == provider_profile_id)
+        .map(|p| p.remote_context_confirmation)
+        .unwrap_or(false);
+
+    let resultado = servico(&deps)?
+        .gerar(&provider_profile_id, tarefa, &prompt, &contexto)
+        .map_err(|e| CommandError::provedor(e.to_string()))?;
+
+    Ok(IaGenerateDto {
+        texto: resultado.resposta.texto,
+        sql: resultado.resposta.sql,
+        modelo: resultado.resposta.modelo,
+        interaction_id: resultado.interacao_id,
+        contexto_relacoes: contexto.relacoes,
+        contexto_truncado: contexto.truncado,
+        contexto_remoto: remoto,
+    })
+}
+
+/// Uma interação do histórico (texto já redigido).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IaInteractionDto {
+    pub id: String,
+    pub provider_profile_id: Option<String>,
+    pub task_type: String,
+    pub prompt_text: String,
+    pub response_text: String,
+    pub accepted_sql: Option<String>,
+    pub created_at: String,
+}
+
+/// Lista o histórico de interações com a IA.
+#[tauri::command]
+pub fn ia_interactions_list(
+    limit: Option<i64>,
+    deps: tauri::State<'_, AppState>,
+) -> Result<Vec<IaInteractionDto>, CommandError> {
+    deps.exigir_armazenamento()?;
+    let limite = limit.unwrap_or(20).clamp(1, 200) as usize;
+    Ok(servico(&deps)?
+        .historico(limite)
+        .map_err(|e| CommandError::provedor(e.to_string()))?
+        .into_iter()
+        .map(|i| IaInteractionDto {
+            id: i.id,
+            provider_profile_id: i.provider_profile_id,
+            task_type: i.task_type,
+            prompt_text: i.prompt_text,
+            response_text: i.response_text,
+            accepted_sql: i.accepted_sql,
+            created_at: i.created_at,
+        })
+        .collect())
+}
+
+/// Marca o SQL sugerido como aceito pelo usuário (auditoria).
+#[tauri::command]
+pub fn ia_interaction_accept_sql(
+    interaction_id: String,
+    sql: String,
+    deps: tauri::State<'_, AppState>,
+) -> Result<bool, CommandError> {
+    deps.exigir_armazenamento()?;
+    servico(&deps)?
+        .marcar_sql_aceito(&interaction_id, &sql)
+        .map_err(|e| CommandError::provedor(e.to_string()))?;
+    Ok(true)
+}

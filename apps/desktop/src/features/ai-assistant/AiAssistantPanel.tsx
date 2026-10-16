@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useState, type JSX } from "react";
 
 import {
+  aceitarSql,
   apagarProvedor,
+  gerar,
+  listarInteracoes,
   listarProvedores,
   listarTemplates,
   previewContexto,
   salvarProvedor,
   testarProvedor,
   type IaContextPreview,
+  type IaGenerate,
+  type IaInteraction,
   type IaTemplate,
 } from "./api";
 import { listarPerfis, consultarStatus } from "../connections/api";
@@ -22,7 +27,7 @@ type Estado = "carregando" | "pronto" | "erro";
  * A chave da API é enviada **uma única vez** no formulário e vai direto para o
  * cofre do sistema: a lista mostra apenas se existe chave, nunca o valor.
  */
-export default function AiAssistantPanel(): JSX.Element {
+export default function AiAssistantPanel({ onInserirSql }: { onInserirSql?: (sql: string, interactionId: string) => void } = {}): JSX.Element {
   const [estado, setEstado] = useState<Estado>("carregando");
   const [mensagem, setMensagem] = useState("");
   const [erro, setErro] = useState<string | null>(null);
@@ -35,6 +40,12 @@ export default function AiAssistantPanel(): JSX.Element {
   const [perfilContexto, setPerfilContexto] = useState("");
   const [contexto, setContexto] = useState<IaContextPreview | null>(null);
   const [gerandoContexto, setGerandoContexto] = useState(false);
+  const [provedorEscolhido, setProvedorEscolhido] = useState("");
+  const [tarefa, setTarefa] = useState("gerar_sql");
+  const [pedido, setPedido] = useState("");
+  const [resposta, setResposta] = useState<IaGenerate | null>(null);
+  const [gerando, setGerando] = useState(false);
+  const [historico, setHistorico] = useState<IaInteraction[]>([]);
 
   const [form, setForm] = useState({
     id: "",
@@ -74,6 +85,46 @@ export default function AiAssistantPanel(): JSX.Element {
       } catch { /* ignora */ }
     })();
   }, [carregar]);
+
+  const carregarHistorico = useCallback(async () => {
+    try { setHistorico(await listarInteracoes(20)); } catch { setHistorico([]); }
+  }, []);
+
+  useEffect(() => {
+    void carregarHistorico();
+  }, [carregarHistorico]);
+
+  const pedir = useCallback(async () => {
+    if (!perfilContexto || provedorEscolhido === "") {
+      setErro("Selecione a conexão e o provedor antes de pedir.");
+      return;
+    }
+    setGerando(true);
+    setErro(null);
+    setResposta(null);
+    try {
+      const r = await gerar(perfilContexto, provedorEscolhido, tarefa, pedido);
+      setResposta(r);
+      await carregarHistorico();
+    } catch (e: any) {
+      setErro(e?.message ?? String(e));
+    } finally {
+      setGerando(false);
+    }
+  }, [perfilContexto, provedorEscolhido, tarefa, pedido, carregarHistorico]);
+
+  const inserirSugestao = useCallback(
+    async (sql: string, interactionId: string) => {
+      try {
+        await aceitarSql(interactionId, sql);
+        onInserirSql?.(sql, interactionId);
+        setMensagem("SQL inserido no editor (sugestão — nada foi executado).");
+      } catch (e: any) {
+        setErro(e?.message ?? String(e));
+      }
+    },
+    [onInserirSql],
+  );
 
   const gerarContexto = useCallback(async () => {
     if (!perfilContexto) return;
@@ -330,6 +381,112 @@ export default function AiAssistantPanel(): JSX.Element {
               apenas metadados (nomes, tipos e chaves) — nunca dados das tabelas.
             </p>
           </>
+        )}
+      </div>
+
+      <div style={estilos.cartao}>
+        <h3 style={{ marginTop: 0, fontSize: "1rem" }}>Assistente (geração, explicação, correção, revisão)</h3>
+        <div style={estilos.linha}>
+          <label style={estilos.rotulo}>
+            Provedor
+            <select
+              style={estilos.entrada}
+              value={provedorEscolhido}
+              onChange={(e) => setProvedorEscolhido(e.target.value)}
+            >
+              <option value="">— selecione —</option>
+              {provedores.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.modelName})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={estilos.rotulo}>
+            Tarefa
+            <select style={estilos.entrada} value={tarefa} onChange={(e) => setTarefa(e.target.value)}>
+              <option value="gerar_sql">Gerar SQL</option>
+              <option value="explicar_sql">Explicar SQL</option>
+              <option value="corrigir_sql">Corrigir SQL</option>
+              <option value="revisar_sql">Revisar SQL</option>
+            </select>
+          </label>
+        </div>
+        <label style={estilos.rotulo}>
+          Pedido (o SQL atual, se for explicar/corrigir/revisar)
+          <textarea
+            style={{ ...estilos.entrada, minHeight: "5rem", width: "100%" }}
+            value={pedido}
+            onChange={(e) => setPedido(e.target.value)}
+            placeholder="ex.: liste os clientes com mais de 10 pedidos"
+          />
+        </label>
+        <div style={{ ...estilos.linha, marginTop: "0.5rem" }}>
+          <button
+            type="button"
+            style={estilos.botaoPrimario}
+            onClick={() => void pedir()}
+            disabled={gerando || provedorEscolhido === "" || pedido.trim() === ""}
+          >
+            {gerando ? "Gerando…" : "Pedir ao assistente"}
+          </button>
+        </div>
+
+        {resposta && (
+          <div style={{ marginTop: "0.75rem" }}>
+            <p style={{ margin: "0 0 0.35rem", fontSize: "0.85rem", color: "#4a4d52" }}>
+              Modelo {resposta.modelo} · contexto com {resposta.contextoRelacoes} relação(ões)
+              {resposta.contextoTruncado && " (truncado)"}
+              {resposta.contextoRemoto && " · enviado a provedor remoto autorizado"}
+            </p>
+            <pre
+              style={{
+                margin: 0,
+                background: "#f4f5f7",
+                border: "1px solid #d9dce1",
+                borderRadius: "4px",
+                padding: "0.6rem",
+                fontSize: "0.85rem",
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {resposta.texto}
+            </pre>
+            {resposta.sql && (
+              <button
+                type="button"
+                style={{ ...estilos.botao, marginTop: "0.5rem" }}
+                onClick={() => void inserirSugestao(resposta.sql as string, resposta.interactionId)}
+              >
+                Inserir SQL sugerido no editor (não executa)
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div style={estilos.cartao}>
+        <h3 style={{ marginTop: 0, fontSize: "1rem" }}>Histórico do assistente</h3>
+        <button type="button" style={estilos.botao} onClick={() => void carregarHistorico()}>
+          Atualizar
+        </button>
+        {historico.length === 0 ? (
+          <p role="status" style={{ margin: "0.5rem 0 0", color: "#4a4d52" }}>
+            Nenhuma interação registrada.
+          </p>
+        ) : (
+          <ul style={{ listStyle: "none", padding: 0, margin: "0.5rem 0 0", fontSize: "0.85rem" }}>
+            {historico.map((h) => (
+              <li key={h.id} style={{ borderBottom: "1px solid #eee", padding: "0.4rem 0" }}>
+                <strong>{h.taskType}</strong>{" "}
+                <span style={{ fontSize: "0.75rem", color: "#4a4d52" }}>{h.createdAt}</span>
+                {h.acceptedSql && <span style={{ fontSize: "0.75rem", color: "#217a3b" }}> · SQL aceito</span>}
+                <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  {h.responseText.slice(0, 220)}
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
 

@@ -15,8 +15,9 @@ use std::sync::Mutex;
 
 use firebird_domain::{ConnectionProfile, DadosPerfil, PersistedProfile, ProfileError};
 use firebird_storage::{
-    AiProviderProfile, AiProviderProfileRepository, ConnectionProfileRecord,
-    ConnectionProfileRepository, Db, QueryHistoryRepository, SavedScriptRepository, StorageError,
+    AiInteraction, AiInteractionRepository, AiProviderProfile, AiProviderProfileRepository,
+    ConnectionProfileRecord, ConnectionProfileRepository, Db, QueryHistoryRepository,
+    SavedScriptRepository, StorageError,
 };
 
 /// Banco local de metadados, seguro para compartilhar entre threads.
@@ -186,6 +187,18 @@ impl BancoLocal {
     /// Remove um provedor de IA; `true` quando algo foi removido.
     pub fn apagar_provedor_ia(&self, id: &str) -> Result<bool, StorageError> {
         AiProviderProfileRepository::delete(&*self.db(), id)
+    }
+}
+
+impl BancoLocal {
+    /// Registra uma interação com a IA.
+    pub fn add_interacao_ia(&self, i: &AiInteraction) -> Result<(), StorageError> {
+        AiInteractionRepository::save(&*self.db(), i)
+    }
+
+    /// Lista interações recentes com a IA (mais nova primeiro).
+    pub fn interacoes_ia(&self, limite: usize) -> Result<Vec<AiInteraction>, StorageError> {
+        AiInteractionRepository::list(&*self.db(), limite)
     }
 }
 

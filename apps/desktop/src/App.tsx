@@ -100,6 +100,7 @@ export default function App(): JSX.Element {
   const [aba, setAba] = useState<Aba>("saude");
   const [temaEscuro, setTemaEscuro] = useState<boolean>(() => (typeof window !== "undefined" && window.localStorage.getItem("fb-tema") === "escuro"));
   const [pendingOpenTable, setPendingOpenTable] = useState<{ perfilId: string; table: string; nonce: number } | null>(null);
+  const [pendingSql, setPendingSql] = useState<{ sql: string; nonce: number } | null>(null);
   const [estado, setEstado] = useState<Estado>({ fase: "carregando" });
 
   const carregarSaude = useCallback(async () => {
@@ -223,7 +224,7 @@ export default function App(): JSX.Element {
         >
           {aba === "sql" && (
             <div style={{ display: "block" }}>
-              <SqlEditorPanel openTableRequest={pendingOpenTable} escuro={temaEscuro} />
+              <SqlEditorPanel openTableRequest={pendingOpenTable} pendingSql={pendingSql} escuro={temaEscuro} />
             </div>
           )}
         </div>
@@ -234,7 +235,14 @@ export default function App(): JSX.Element {
           aria-labelledby="aba-ia"
           hidden={aba !== "ia"}
         >
-          {aba === "ia" && <AiAssistantPanel />}
+          {aba === "ia" && (
+            <AiAssistantPanel
+              onInserirSql={(sql) => {
+                setPendingSql({ sql, nonce: Date.now() });
+                setAba("sql");
+              }}
+            />
+          )}
         </div>
       </div>
     </main>

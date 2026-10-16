@@ -135,6 +135,16 @@ Baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
   - Comandos `ia_context_preview` (devolve o texto **sem enviar nada**) e
     `ia_template_list`; UI na aba IA com perfil conectado, pré-visualização do
     contexto e lista de templates com versão.
+- **Fase 3 — Passo 3: geração/explicação/correção com histórico**:
+  - Storage: repositório de `ai_interactions` (prompt, resumo do contexto, resposta,
+    `accepted_sql`) com `Debug` redigido.
+  - `IaService::gerar` monta contexto → prompt versionado → chave lida do cofre →
+    chamada ao provedor → registro no histórico; `historico` e `marcar_sql_aceito`
+    para auditoria. Impressão digital do contexto (FNV-1a) sem guardar o esquema.
+  - Comandos `ia_generate`, `ia_interactions_list`, `ia_interaction_accept_sql`.
+  - UI: pedido (provedor + tarefa + texto), resposta com metadados do envio,
+    botão **Inserir SQL sugerido no editor** (vai para a aba SQL ativa, **sem
+    executar**) e histórico do assistente.
 - Estrutura inicial do repositório (monorepo pnpm + workspace Cargo Rust).
 - Especificação técnica extraída por tema em `docs/specs/` (17 documentos, do documento
   original v0.1 preservado em `docs/original/`).

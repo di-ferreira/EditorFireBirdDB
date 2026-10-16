@@ -62,3 +62,49 @@ export async function listarTemplates(): Promise<IaTemplate[]> {
   try { return await invoke<IaTemplate[]>("ia_template_list", {}); }
   catch (e) { throw normalizarErro(e); }
 }
+
+export type IaGenerate = {
+  texto: string;
+  sql?: string | null;
+  modelo: string;
+  interactionId: string;
+  contextoRelacoes: number;
+  contextoTruncado: boolean;
+  contextoRemoto: boolean;
+};
+
+export async function gerar(
+  profileId: string,
+  providerProfileId: string,
+  tarefa: string,
+  prompt: string,
+): Promise<IaGenerate> {
+  try {
+    return await invoke<IaGenerate>("ia_generate", {
+      profileId,
+      providerProfileId,
+      task: tarefa,
+      prompt,
+    });
+  } catch (e) { throw normalizarErro(e); }
+}
+
+export type IaInteraction = {
+  id: string;
+  providerProfileId?: string | null;
+  taskType: string;
+  promptText: string;
+  responseText: string;
+  acceptedSql?: string | null;
+  createdAt: string;
+};
+
+export async function listarInteracoes(limite = 20): Promise<IaInteraction[]> {
+  try { return await invoke<IaInteraction[]>("ia_interactions_list", { limit: limite }); }
+  catch (e) { throw normalizarErro(e); }
+}
+
+export async function aceitarSql(interactionId: string, sql: string): Promise<boolean> {
+  try { return await invoke<boolean>("ia_interaction_accept_sql", { interactionId, sql }); }
+  catch (e) { throw normalizarErro(e); }
+}

@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use firebird_domain::{ErroIa, ProvedorIaConfig, TipoProvedorIa};
 use firebird_security::SecretStore;
-use firebird_storage::{agora_iso8601, AiProviderProfile};
+use firebird_storage::{agora_iso8601, AiInteraction, AiProviderProfile};
 
 use crate::application::ia::{ProvedorIa, ProvedorOpenAiCompat, TransporteHttp};
 use crate::storage::BancoLocal;
@@ -177,6 +177,99 @@ impl IaService {
         Ok(removido)
     }
 
+    /// Gera uma resposta do modelo com o contexto do schema do perfil.
+    ///
+    /// Fluxo: monta contexto (metadados) → prompt do template versionado →
+    /// chave da API lida do cofre → chamada ao provedor → registro em
+    /// `ai_interactions`. O SQL devolvido é **sugestão**: nada é executado.
+    pub fn gerar(
+        &self,
+        provider_id: &str,
+        tarefa: firebird_domain::TarefaIa,
+        entrada: &str,
+        contexto: &crate::application::ia_context::ContextoSchema,
+    ) -> Result<ResultadoGerado, ErroServicoIa> {
+        if entrada.trim().is_empty() {
+            return Err(ErroServicoIa::Infra("o pedido está vazio".into()));
+        }
+        let registro = self
+            .repos
+            .obter_provedor_ia(provider_id)
+            .map_err(|e| ErroServicoIa::Infra(firebird_domain::redigir_segredo(&e.to_string())))?
+            .ok_or(ErroServicoIa::NaoEncontrado)?;
+        let config = Self::config_de(&registro).map_err(|e| ErroServicoIa::Infra(e.to_string()))?;
+
+        let template = crate::application::ia_context::template_de(tarefa)
+            .ok_or_else(|| ErroServicoIa::Infra("tarefa sem template".into()))?;
+        let prompt = crate::application::ia_context::montar_prompt(template, contexto, entrada);
+
+        // A chave sai do cofre só agora e só para o cabeçalho HTTP.
+        let chave = match registro.secret_ref.as_deref() {
+            Some(referencia) => self.secrets.get(referencia).map_err(|e| {
+                ErroServicoIa::Infra(firebird_domain::redigir_segredo(&e.to_string()))
+            })?,
+            None => None,
+        };
+
+        let provedor = ProvedorOpenAiCompat {
+            config,
+            transporte: self.transporte.clone(),
+        };
+        let pedido = firebird_domain::PedidoIa {
+            tarefa,
+            prompt: entrada.to_string(),
+            contexto: contexto.texto.clone(),
+        };
+        let resposta = provedor
+            .gerar(&pedido, chave.as_deref())
+            .map_err(|e| ErroServicoIa::Infra(e.to_string()))?;
+
+        let resumo = resumo_do_contexto(contexto);
+        let interacao = AiInteraction {
+            id: crate::application::connection_manager::novo_id("iax"),
+            provider_profile_id: Some(registro.id.clone()),
+            connection_fingerprint: Some(impressao_do_contexto(contexto)),
+            task_type: tarefa.as_str().to_string(),
+            prompt_text: redigir(&prompt),
+            context_summary: resumo,
+            response_text: redigir(&resposta.texto),
+            accepted_sql: resposta.sql.clone().map(|s| redigir(&s)),
+            created_at: agora_iso8601(),
+        };
+        self.repos
+            .add_interacao_ia(&interacao)
+            .map_err(|e| ErroServicoIa::Infra(firebird_domain::redigir_segredo(&e.to_string())))?;
+
+        Ok(ResultadoGerado {
+            resposta,
+            interacao_id: interacao.id,
+        })
+    }
+
+    /// Lista interações recentes para a UI mostrar o histórico.
+    pub fn historico(&self, limite: usize) -> Result<Vec<AiInteraction>, ErroServicoIa> {
+        self.repos
+            .interacoes_ia(limite.clamp(1, 500))
+            .map_err(|e| ErroServicoIa::Infra(firebird_domain::redigir_segredo(&e.to_string())))
+    }
+
+    /// Marca o SQL sugerido como aceito (registro de auditoria).
+    pub fn marcar_sql_aceito(&self, interacao_id: &str, sql: &str) -> Result<(), ErroServicoIa> {
+        let mut interacoes = self
+            .repos
+            .interacoes_ia(500)
+            .map_err(|e| ErroServicoIa::Infra(firebird_domain::redigir_segredo(&e.to_string())))?;
+        let alvo = interacoes
+            .iter_mut()
+            .find(|i| i.id == interacao_id)
+            .ok_or(ErroServicoIa::NaoEncontrado)?;
+        alvo.accepted_sql = Some(redigir(sql));
+        alvo.created_at = alvo.created_at.clone();
+        self.repos
+            .add_interacao_ia(alvo)
+            .map_err(|e| ErroServicoIa::Infra(firebird_domain::redigir_segredo(&e.to_string())))
+    }
+
     /// Testa a configuração chamando o provedor (sem contexto do banco).
     ///
     /// A chave do cofre **não** é enviada no teste: só_ENDPOINT e modelo são
@@ -196,6 +289,41 @@ impl IaService {
             .testar()
             .map_err(|e| ErroServicoIa::Infra(firebird_domain::redigir_segredo(&e)))
     }
+}
+
+/// Resposta do modelo com o id da interação registrada.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultadoGerado {
+    /// Texto e SQL sugerido pelo modelo.
+    pub resposta: firebird_domain::RespostaIa,
+    /// Id registrado em `ai_interactions`.
+    pub interacao_id: String,
+}
+
+fn redigir(texto: &str) -> String {
+    firebird_domain::redigir_segredo(texto)
+}
+
+/// Resumo curto do contexto: nomes das relações enviadas (nunca colunas/dados).
+fn resumo_do_contexto(contexto: &crate::application::ia_context::ContextoSchema) -> String {
+    let nomes: Vec<&str> = contexto
+        .texto
+        .lines()
+        .filter_map(|l| l.split_whitespace().nth(1))
+        .take(40)
+        .collect();
+    format!("{} relação(ões): {}", contexto.relacoes, nomes.join(", "))
+}
+
+/// Impressão digital estável do contexto (FNV-1a 64) — permite saber, depois,
+/// se a resposta foi gerada sobre o mesmo esquema, sem guardar o esquema inteiro.
+pub fn impressao_do_contexto(contexto: &crate::application::ia_context::ContextoSchema) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in contexto.texto.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
 }
 
 #[cfg(test)]
@@ -322,6 +450,117 @@ mod tests {
                 ..entrada("x")
             })
             .is_err());
+    }
+
+    /// Transporte que devolve um SQL e registra o corpo recebido.
+    struct TransporteResposta {
+        resposta: String,
+        corpo: std::sync::Mutex<String>,
+    }
+
+    impl TransporteHttp for TransporteResposta {
+        fn post_json(
+            &self,
+            _url: &str,
+            _headers: &[(String, String)],
+            corpo: &str,
+            _timeout_ms: i64,
+        ) -> Result<String, String> {
+            if let Ok(mut g) = self.corpo.lock() {
+                *g = corpo.to_string();
+            }
+            Ok(self.resposta.clone())
+        }
+    }
+
+    fn contexto_de_teste() -> crate::application::ia_context::ContextoSchema {
+        crate::application::ia_context::ContextoSchema {
+            texto: "Esquema do banco (apenas metadados, sem dados):\nTABELA CLIENTES(ID:INTEGER NOT NULL)  PK(ID)".into(),
+            relacoes: 1,
+            relacoes_omitidas: 0,
+            truncado: false,
+        }
+    }
+
+    #[test]
+    fn gerar_registra_interacao_e_devolve_sql_sugerido() {
+        let repos = Arc::new(BancoLocal::em_memoria().expect("banco em memória"));
+        let cofre = Arc::new(InMemorySecretStore::new());
+        let transporte = Arc::new(TransporteResposta {
+            resposta: r#"{"choices":[{"message":{"content":"```sql\nSELECT FIRST 10 ID FROM CLIENTES\n```"}}]}"#.into(),
+            corpo: std::sync::Mutex::new(String::new()),
+        });
+        let servico = IaService::new(repos.clone(), cofre.clone(), transporte.clone());
+        let perfil = servico
+            .salvar(ProvedorEntrada {
+                api_key: Some("sk-secreto".into()),
+                ..entrada("Ollama")
+            })
+            .expect("salvando provedor");
+
+        let resultado = servico
+            .gerar(
+                &perfil.id,
+                firebird_domain::TarefaIa::GerarSql,
+                "liste os clientes",
+                &contexto_de_teste(),
+            )
+            .expect("gerando");
+
+        assert_eq!(
+            resultado.resposta.sql.as_deref(),
+            Some("SELECT FIRST 10 ID FROM CLIENTES")
+        );
+
+        // Histórico registrado, sem segredo em nenhum campo.
+        let historico = servico.historico(10).expect("histórico");
+        assert_eq!(historico.len(), 1);
+        assert_eq!(historico[0].task_type, "gerar_sql");
+        assert!(historico[0].connection_fingerprint.is_some());
+        assert!(!format!("{:?}", historico[0]).contains("sk-secreto"));
+        assert!(historico[0].context_summary.contains("CLIENTES"));
+
+        // O contexto entrou no prompt enviado ao provedor.
+        let corpo = transporte.corpo.lock().expect("corpo").clone();
+        assert!(corpo.contains("TABELA CLIENTES"));
+
+        // Marcar o SQL aceito atualiza o registro.
+        servico
+            .marcar_sql_aceito(&resultado.interacao_id, "SELECT FIRST 10 ID FROM CLIENTES")
+            .expect("marcando");
+        assert!(servico
+            .historico(10)
+            .expect("histórico")
+            .first()
+            .and_then(|i| i.accepted_sql.clone())
+            .is_some());
+    }
+
+    #[test]
+    fn gerar_recusa_pedido_vazio() {
+        let (servico, _repos, _cofre) = servico();
+        let erro = servico
+            .gerar(
+                "qualquer",
+                firebird_domain::TarefaIa::GerarSql,
+                "   ",
+                &contexto_de_teste(),
+            )
+            .expect_err("pedido vazio");
+        assert!(erro.to_string().contains("vazio"));
+    }
+
+    #[test]
+    fn impressao_do_contexto_muda_com_o_esquema() {
+        let a = contexto_de_teste();
+        let mut b = a.clone();
+        b.texto
+            .push_str("\nTABELA PEDIDOS(ID:INTEGER NOT NULL)  PK(ID)");
+        assert_ne!(
+            super::impressao_do_contexto(&a),
+            super::impressao_do_contexto(&b)
+        );
+        assert_eq!(super::impressao_do_contexto(&a).len(), 16);
     }
 
     #[test]

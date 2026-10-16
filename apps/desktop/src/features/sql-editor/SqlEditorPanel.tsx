@@ -144,7 +144,7 @@ const splitStatements = (sql: string): string[] => {
   return out;
 };
 
-export default function SqlEditorPanel({ openTableRequest, escuro }: { openTableRequest?: { perfilId: string; table: string; nonce: number } | null; escuro?: boolean } = {}): JSX.Element {
+export default function SqlEditorPanel({ openTableRequest, pendingSql, escuro }: { openTableRequest?: { perfilId: string; table: string; nonce: number } | null; pendingSql?: { sql: string; nonce: number } | null; escuro?: boolean } = {}): JSX.Element {
   const [perfilId, setPerfilId] = useState<string>("");
   const [perfis, setPerfis] = useState<ConnectionProfile[]>([]);
   const [statusPorPerfil, setStatusPorPerfil] = useState<Record<string, ConnectionStatusInfo>>({});
@@ -162,6 +162,16 @@ export default function SqlEditorPanel({ openTableRequest, escuro }: { openTable
   const [objetosBusca, setObjetosBusca] = useState("");
   const [objetos, setObjetos] = useState<{ nome: string; kind: string }[]>([]);
   const [carregandoObjetos, setCarregandoObjetos] = useState(false);
+
+  /** Recebe a sugestão de SQL da aba IA e a insere na aba ativa (sem executar). */
+  useEffect(() => {
+    if (!pendingSql) return;
+    const sql = pendingSql.sql;
+    setAbas((prev) => prev.map((a) => (a.id === abaAtiva ? { ...a, content: sql } : a)));
+    definirDoc(sql);
+    setMensagemErro(null);
+    setMensagemTransacao("SQL inserido pelo assistente — revisão antes de executar.");
+  }, [pendingSql?.nonce]);
 
   const carregarObjetos = useCallback(async (perfil: string) => {
     if (!perfil) { setObjetos([]); return; }
