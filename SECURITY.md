@@ -62,8 +62,10 @@ Cada release publica o inventário de componentes em
 `Cargo.lock` e `pnpm-lock.yaml` por `scripts/gen_sbom.py` (sem rede). Para conferir:
 
 ```sh
-python3 scripts/gen_sbom.py | diff - docs/security/sbom.cdx.json && echo SBOM atualizado
+python3 scripts/gen_sbom.py --check docs/security/sbom.cdx.json
 ```
+
+(Para regerar: `python3 scripts/gen_sbom.py > docs/security/sbom.cdx.json`.)
 
 As **licenças** não vêm dos lockfiles e por isso aparecem como `NOASSERTION` no SBOM; o
 inventário de licenças continua em [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

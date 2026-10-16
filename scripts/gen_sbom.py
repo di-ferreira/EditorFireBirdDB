@@ -145,7 +145,20 @@ def componentes_npm() -> tuple[list[dict], list[dict]]:
     return componentes, relacoes
 
 
-def main() -> int:
+def comparar_com_arquivo(caminho: Path) -> int:
+    """Compara o SBOM gerado com o arquivo, ignorando o timestamp."""
+    gerado = json.loads(json.dumps(_construir()))
+    atual = json.loads(caminho.read_text(encoding="utf-8"))
+    for doc in (gerado, atual):
+        doc.get("metadata", {}).pop("timestamp", None)
+    if gerado == atual:
+        print("SBOM atualizado")
+        return 0
+    print("SBOM desatualizado: rode `python3 scripts/gen_sbom.py > docs/security/sbom.cdx.json`")
+    return 1
+
+
+def _construir() -> dict:
     comps_rust, rels_rust = componentes_rust()
     comps_npm, rels_npm = componentes_npm()
 
@@ -185,7 +198,13 @@ def main() -> int:
         + rels_npm,
     }
 
-    json.dump(bom, sys.stdout, indent=2, ensure_ascii=False)
+    return bom
+
+
+def main() -> int:
+    if len(sys.argv) > 2 and sys.argv[1] == "--check":
+        return comparar_com_arquivo(RAIZ / sys.argv[2])
+    json.dump(_construir(), sys.stdout, indent=2, ensure_ascii=False)
     sys.stdout.write("\n")
     return 0
 
