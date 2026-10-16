@@ -6,6 +6,7 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
+import { autocompletion, type CompletionContext } from "@codemirror/autocomplete";
 import { defaultKeymap } from "@codemirror/commands";
 import { sql } from "@codemirror/lang-sql";
 
@@ -140,6 +141,7 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
   const [salvando, setSalvando] = useState<boolean>(false);
   const viewRef = useRef<EditorView | null>(null);
   const executarRef = useRef<(() => Promise<void>) | null>(null);
+  const objetosRef = useRef<{ nome: string; kind: string }[]>([]);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const carregarPerfis = useCallback(async () => {
@@ -163,6 +165,20 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
   // Mount CodeMirror
   useEffect(() => {
     if (!containerRef.current) return;
+    const palavrasChave = ["SELECT","FROM","WHERE","GROUP","BY","ORDER","HAVING","JOIN","LEFT","RIGHT","INNER","OUTER","ON","LIKE","IN","NOT","AND","OR","AS","DISTINCT","FIRST","SKIP","STARTING","WITH","UNION","ALL","INSERT","INTO","VALUES","UPDATE","SET","DELETE","CREATE","ALTER","TABLE","VIEW","INDEX","PROCEDURE","TRIGGER","COMMIT","ROLLBACK"];
+    const fonteCompletacao = (context: CompletionContext) => {
+      const word = context.matchBefore(/\w*/);
+      if (!word || (word.from === word.to && !context.explicit)) return null;
+      const itens = [
+        ...palavrasChave.map((k) => ({ label: k, type: "keyword" })),
+        ...objetosRef.current.map((o) => ({ label: o.nome, type: o.kind, info: o.kind })),
+      ];
+      const lower = word.text.toLowerCase();
+      const filtrados = itens.filter((i) => i.label.toLowerCase().startsWith(lower));
+      if (filtrados.length === 0) return null;
+      return { from: word.from, options: filtrados.slice(0, 60), validFor: /^\w*$/ };
+    };
+
     const view = new EditorView({
       state: EditorState.create({
         doc: aba?.content ?? "",
@@ -170,10 +186,18 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
           lineNumbers(),
           sql(),
           EditorView.lineWrapping,
+          autocompletion({ activateOnTyping: true, override: [fonteCompletacao] }),
           cmKeymap.of(defaultKeymap),
           cmKeymap.of([
             { key: "Ctrl-Enter", run: () => { void executarRef.current?.(); return true; }, preventDefault: true },
+            { key: "Ctrl-Shift-Enter", run: () => { void executarRef.current?.(); return true; }, preventDefault: true },
             { key: "Mod-s", run: () => { void salvarAbaComoScript(); return true; }, preventDefault: true },
+            { key: "Mod-n", run: () => { novaAba(); return true; }, preventDefault: true },
+            { key: "Mod-w", run: () => {
+              if (abas.length > 1) fecharAba(abaAtiva);
+              return true;
+            }, preventDefault: true },
+            { key: "F9", run: () => { void executarRef.current?.(); return true; }, preventDefault: true },
           ]),
         ],
       }),
