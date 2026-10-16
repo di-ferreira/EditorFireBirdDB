@@ -159,6 +159,11 @@ Baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
   - Pacote `.deb` como entrega principal (`bundle.active`, alvo `deb`, dependências
     `libwebkit2gtk-4.1-0`, `libgtk-3-0`, `libssl3`, `ca-certificates`; recomenda
     `libfbclient2`); janela padrão 1440×900.
+  - AppImage gerado (`targets: ["deb", "appimage"]`, ~86 MiB, WebKitGTK embutido)
+    com conjunto de ícones PNG em RGBA (32/64/128/256/512) — o `appimagetool`
+    exige ícone quadrado e o Tauri exige RGBA.
+  - Guia rápido do AppImage em `docs/instalacao.md` (executar, `--appimage-extract`,
+    FUSE ausente).
   - Release `v0.1.0` publicada com o `.deb` e arquivo `.sha256`.
   - Guia de instalação em `docs/instalacao.md` (pacote, código-fonte, biblioteca
     cliente, primeiro uso, IA, diagnóstico).

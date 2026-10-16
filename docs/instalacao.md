@@ -33,7 +33,27 @@ oferece instalar a biblioteca cliente junto. Remover:
 sudo apt remove firebird-studio-linux
 ```
 
-### 2.2 a partir do código-fonte
+### 2.2 AppImage (sem instalar nada no sistema)
+
+Baixe o asset `.AppImage` da release e:
+
+```sh
+chmod +x Firebird.Studio.Linux_0.1.0_amd64.AppImage
+./Firebird.Studio.Linux_0.1.0_amd64.AppImage
+```
+
+A AppImage (~86 MiB) traz o WebKitGTK junto, então funciona em distribuições onde o
+`.deb` não instala. Ela **não** embarca a `libfbclient.so`: o app usa a biblioteca do
+sistema ou a que você informar em `clientLibraryPath`.
+
+Sem FUSE instalado, extraia e execute manualmente:
+
+```sh
+./Firebird.Studio.Linux_0.1.0_amd64.AppImage --appimage-extract
+./squashfs-root/AppRun
+```
+
+### 2.3 a partir do código-fonte
 
 ```sh
 # Rust estável e Node 20+
@@ -55,7 +75,7 @@ cargo fmt --all --check
 # → target/release/bundle/deb/
 ```
 
-### 2.3 binário sem empacotar
+### 2.4 binário sem empacotar
 
 ```sh
 cargo build --release -p firebird-studio-desktop --manifest-path apps/desktop/src-tauri/Cargo.toml
