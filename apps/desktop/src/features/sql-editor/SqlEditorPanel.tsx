@@ -10,16 +10,13 @@ import { defaultKeymap } from "@codemirror/commands";
 import { sql } from "@codemirror/lang-sql";
 
 import { listarPerfis, consultarStatus } from "../connections/api";
+import { buscarNoNoCatalogo } from "../db-explorer/api";
 import type { ConnectionProfile, ConnectionStatusInfo } from "../connections/types";
 import {
-  apagarScript,
   executarConsulta,
-  limparHistorico,
-  listarHistorico,
-  listarScripts,
   salvarScript,
 } from "./api";
-import type { ApiQueryResult, SavedScriptDto, HistoryEntryDto, SqlTab } from "./types";
+import type { ApiQueryResult, SqlTab } from "./types";
 
 const novoid = () => Math.random().toString(36).slice(2, 10);
 
@@ -116,9 +113,29 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
   const [resultados, setResultados] = useState<ApiQueryResult[]>([]);
   const [mensagemErro, setMensagemErro] = useState<string | null>(null);
   const [executando, setExecutando] = useState<boolean>(false);
-  const [abaLateral, setAbaLateral] = useState<"scripts" | "historico">("scripts");
-  const [scripts, setScripts] = useState<SavedScriptDto[]>([]);
-  const [historico, setHistorico] = useState<HistoryEntryDto[]>([]);
+  const [objetosBusca, setObjetosBusca] = useState("");
+  const [objetos, setObjetos] = useState<{ nome: string; kind: string }[]>([]);
+  const [carregandoObjetos, setCarregandoObjetos] = useState(false);
+
+  const carregarObjetos = useCallback(async (perfil: string) => {
+    if (!perfil) { setObjetos([]); return; }
+    setCarregandoObjetos(true);
+    try {
+      const linhas: { nome: string; kind: string }[] = [];
+      for (const categoria of ["tabelas", "views", "procedures"] as const) {
+        try {
+          const r = await buscarNoNoCatalogo(perfil, { kind: "categoria", categoria }, null, false, false);
+          for (const child of r.children ?? []) {
+            linhas.push({ nome: child.label.trim(), kind: categoria });
+          }
+        } catch { /* ignora */ }
+      }
+      setObjetos(linhas);
+    } finally {
+      setCarregandoObjetos(false);
+    }
+  }, []);
+
   const [salvando, setSalvando] = useState<boolean>(false);
   const viewRef = useRef<EditorView | null>(null);
   const executarRef = useRef<(() => Promise<void>) | null>(null);
@@ -139,6 +156,7 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
   }, [perfilId]);
 
   useEffect(() => { void carregarPerfis(); }, [carregarPerfis]);
+  useEffect(() => { void carregarObjetos(perfilId); }, [perfilId, carregarObjetos]);
 
   const aba = abas.find((a) => a.id === abaAtiva) ?? abas[0];
   // Mount CodeMirror
@@ -184,6 +202,15 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
     setAbaAtiva(id);
     setTimeout(() => { void executarRef.current?.(); }, 120);
   }, [openTableRequest?.nonce]);
+
+
+  const abrirDadosTabela = useCallback((tabela: string) => {
+    if (!perfilId) return;
+    const id = novoid();
+    setAbas((prev) => [...prev, { id, title: `Dados: ${tabela}`, content: `SELECT FIRST 500 * FROM ${tabela}` }]);
+    setAbaAtiva(id);
+    setTimeout(() => { void executarRef.current?.(); }, 150);
+  }, [perfilId]);
 
   const executar = useCallback(async () => {
     atualizarAbaConteudo();
@@ -231,7 +258,6 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
     setSalvando(true);
     try {
       await salvarScript(nome, lerConteudo(), perfilId || undefined);
-      setScripts(await listarScripts());
     } catch (e: any) {
       setMensagemErro(e?.message ?? String(e));
     } finally {
@@ -239,20 +265,6 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
     }
   }, [perfilId]);
 
-  const carregarScripts = useCallback(async () => {
-    try { setScripts(await listarScripts()); } catch { /* ignore */ }
-  }, []);
-  const carregarHistorico = useCallback(async () => {
-    try { setHistorico(await listarHistorico(50)); } catch { /* ignore */ }
-  }, []);
-
-  useEffect(() => { void carregarScripts(); }, [carregarScripts]);
-
-  const abrirScript = async (s: SavedScriptDto) => {
-    const id = novoid();
-    setAbas((prev) => [...prev, { id, title: s.name, content: s.content }]);
-    setAbaAtiva(id);
-  };
 
   const estilo: Record<string, React.CSSProperties> = {
     raiz: { fontFamily: "system-ui, sans-serif", padding: "1rem", background: "#f7f8fa" },
@@ -318,8 +330,34 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
         ))}
       </div>
 
-      <div style={estilo.layout}>
-        <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "240px 1fr", gap: "1rem", alignItems: "start" }}>
+        <div style={{ border: "1px solid #d9dce1", borderRadius: "8px", padding: "0.5rem", background: "#fff", maxHeight: "calc(100vh - 12rem)", overflow: "auto" }}>
+          <div style={{ fontWeight: 600, marginBottom: "0.4rem" }}>Objetos</div>
+          <input
+            type="search"
+            placeholder="Filtrar…"
+            value={objetosBusca}
+            onChange={(e) => setObjetosBusca(e.target.value)}
+            style={{ width: "100%", padding: "0.35rem", border: "1px solid #b7bcc4", borderRadius: "6px", marginBottom: "0.5rem" }}
+          />
+          {carregandoObjetos && <div style={{ fontSize: "0.8rem", color: "#4a4d52" }}>Carregando…</div>}
+          <ul style={{ listStyle: "none", padding: 0, margin: 0, fontSize: "0.9rem" }}>
+            {objetos.filter((o) => o.nome.toLowerCase().includes(objetosBusca.toLowerCase())).map((o, i) => (
+              <li key={`${o.kind}-${o.nome}-${i}`} style={{ marginBottom: "0.2rem" }}>
+                <button
+                  type="button"
+                  onDoubleClick={() => abrirDadosTabela(o.nome)}
+                  style={{ width: "100%", textAlign: "left", padding: "0.3rem", border: "none", background: "transparent", cursor: "pointer" }}
+                  title="Duplo clique para abrir dados"
+                >
+                  <span style={{ fontSize: "0.7rem", color: "#999", marginRight: "0.3rem" }}>{o.kind}</span>
+                  {o.nome}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div style={{ minWidth: 0 }}>
           <div ref={containerRef} style={estilo.editor} />
           {resultados.map((r, idx) => (
             <div key={idx} style={{ marginBottom: "1rem" }}>
@@ -358,47 +396,7 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
           ))}
         </div>
 
-        <aside style={estilo.lateral}>
-          <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
-            <button type="button" style={{ ...estilo.botao, background: abaLateral === "scripts" ? "#e8f0fa" : "#fff" }} onClick={() => setAbaLateral("scripts")}>Scripts</button>
-            <button type="button" style={{ ...estilo.botao, background: abaLateral === "historico" ? "#e8f0fa" : "#fff" }} onClick={() => setAbaLateral("historico")}>Histórico</button>
-          </div>
-          {abaLateral === "scripts" ? (
-            <div>
-              <button type="button" style={estilo.botao} onClick={() => void carregarScripts()}>
-                Recarregar
-              </button>
-              <ul style={{ listStyle: "none", padding: 0, marginTop: "0.5rem" }}>
-                {scripts.map((s) => (
-                  <li key={s.id} style={{ marginBottom: "0.35rem" }}>
-                    <button type="button" style={{ ...estilo.botao, width: "100%", textAlign: "left" }} onClick={() => void abrirScript(s)}>
-                      {s.name}
-                    </button>
-                    <button type="button" style={{ fontSize: "0.7rem", marginLeft: "0.25rem" }} onClick={() => void apagarScript(s.id).then(carregarScripts)}>Remover</button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : (
-            <div>
-              <button type="button" style={estilo.botao} onClick={() => void carregarHistorico()}>
-                Recarregar
-              </button>
-              <button type="button" style={estilo.botao} onClick={() => void limparHistorico().then(carregarHistorico)}>
-                Limpar
-              </button>
-              <ul style={{ listStyle: "none", padding: 0, marginTop: "0.5rem", fontSize: "0.8rem" }}>
-                {historico.map((h) => (
-                  <li key={h.id} style={{ marginBottom: "0.4rem", borderBottom: "1px solid #eee", paddingBottom: "0.3rem" }}>
-                    <span style={{ color: h.status === "ok" ? "#217a3b" : "#a4262c" }}>{h.status}</span>
-                    <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{h.queryText.slice(0, 140)}</div>
-                    <small>{h.rowsReturned ?? 0} linhas · {h.durationMs ?? 0} ms</small>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </aside>
+
       </div>
     </section>
   );
