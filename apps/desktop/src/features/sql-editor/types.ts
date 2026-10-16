@@ -33,3 +33,11 @@ export type HistoryEntryDto = {
   executedAt: string;
   executionMode: string;
 };
+
+export type SqlRisk = {
+  nivel: "leitura" | "transacao" | "escrita" | "estrutural" | "destrutivo";
+  rotulo: string;
+  exigeConfirmacao: boolean;
+  motivos: string[];
+  multiplasInstrucoes: boolean;
+};

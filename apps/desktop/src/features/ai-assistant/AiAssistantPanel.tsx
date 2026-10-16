@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState, type JSX } from "react";
 import {
   aceitarSql,
   apagarProvedor,
+  avaliarRiscoSql,
   gerar,
   listarInteracoes,
   listarProvedores,
@@ -115,6 +116,14 @@ export default function AiAssistantPanel({ onInserirSql }: { onInserirSql?: (sql
 
   const inserirSugestao = useCallback(
     async (sql: string, interactionId: string) => {
+      // Risco conservador antes de aceitar: escrita/DDL exigem confirmação.
+      const risco = await avaliarRiscoSql(sql).catch(() => null);
+      if (risco?.exigeConfirmacao) {
+        const ok = window.confirm(
+          `SQL classificado como ${risco.rotulo}.\n\n${risco.motivos.join("\n")}\n\nInserir no editor mesmo assim? (Nada é executado agora.)`,
+        );
+        if (!ok) return;
+      }
       try {
         await aceitarSql(interactionId, sql);
         onInserirSql?.(sql, interactionId);

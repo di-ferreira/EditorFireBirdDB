@@ -317,3 +317,30 @@ pub fn ia_interaction_accept_sql(
         .map_err(|e| CommandError::provedor(e.to_string()))?;
     Ok(true)
 }
+
+/// Avaliação de risco de um texto SQL (local, sem rede e sem IA).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SqlRiskDto {
+    pub nivel: String,
+    pub rotulo: String,
+    pub exige_confirmacao: bool,
+    pub motivos: Vec<String>,
+    pub multiplas_instrucoes: bool,
+}
+
+/// Classifica o risco do SQL informado.
+///
+/// Usado pelo editor **antes** de executar e pela UI da IA antes de aceitar uma
+/// sugestão: escrita/estrutura sempre exigem confirmação explícita.
+#[tauri::command]
+pub fn sql_risk_assessment(sql: String) -> Result<SqlRiskDto, CommandError> {
+    let a = firebird_domain::avaliar_sql(&sql);
+    Ok(SqlRiskDto {
+        nivel: a.nivel.as_str().to_string(),
+        rotulo: a.nivel.rotulo().to_string(),
+        exige_confirmacao: a.exige_confirmacao(),
+        motivos: a.motivos,
+        multiplas_instrucoes: a.multiplas_instrucoes,
+    })
+}

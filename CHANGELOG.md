@@ -145,6 +145,16 @@ Baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
   - UI: pedido (provedor + tarefa + texto), resposta com metadados do envio,
     botão **Inserir SQL sugerido no editor** (vai para a aba SQL ativa, **sem
     executar**) e histórico do assistente.
+- **Fase 3 — Passo 4: revisão de SQL, risco e consentimento**:
+  - `firebird_domain::risk`: `NivelRisco` (leitura → transação → escrita →
+    estrutural → destrutivo), `avaliar_sql` removendo comentários/literais antes de
+    classificar, detecção de escrita escondida em CTE e de múltiplas instruções.
+    Desconhecido cai sempre em **destrutivo** (conservador).
+  - Comando `sql_risk_assessment` (local, sem rede e sem IA).
+  - Editor: antes de executar, mostra o risco; escrita/estrutura/destrutivo abrem
+    diálogo de confirmação com os motivos. `SELECT` passa direto.
+  - Assistente: aceitar uma sugestão com risco exige confirmação explícita, e o
+    SQL só é inserido no editor — **nunca executado**.
 - Estrutura inicial do repositório (monorepo pnpm + workspace Cargo Rust).
 - Especificação técnica extraída por tema em `docs/specs/` (17 documentos, do documento
   original v0.1 preservado em `docs/original/`).

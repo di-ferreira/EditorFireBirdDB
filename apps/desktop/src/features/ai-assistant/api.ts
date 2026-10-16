@@ -108,3 +108,17 @@ export async function aceitarSql(interactionId: string, sql: string): Promise<bo
   try { return await invoke<boolean>("ia_interaction_accept_sql", { interactionId, sql }); }
   catch (e) { throw normalizarErro(e); }
 }
+
+export type SqlRisk = {
+  nivel: "leitura" | "transacao" | "escrita" | "estrutural" | "destrutivo";
+  rotulo: string;
+  exigeConfirmacao: boolean;
+  motivos: string[];
+  multiplasInstrucoes: boolean;
+};
+
+/** Classificação local de risco do SQL sugerido (sem rede, sem IA). */
+export async function avaliarRiscoSql(sql: string): Promise<SqlRisk> {
+  try { return await invoke<SqlRisk>("sql_risk_assessment", { sql }); }
+  catch (e) { throw normalizarErro(e); }
+}

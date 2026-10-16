@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { normalizarErro } from "../connections/api";
-import type { ApiQueryResult, SavedScriptDto, HistoryEntryDto } from "./types";
+import type { ApiQueryResult, SavedScriptDto, HistoryEntryDto, SqlRisk } from "./types";
 
 /** Executa uma instrução; sem paginação (DML/DDL ou consulta única). */
 export async function executarConsulta(perfilId: string, sql: string): Promise<ApiQueryResult> {
@@ -103,5 +103,13 @@ export type ColunaTabela = { name: string; exceedsBuffer: boolean };
 
 export async function colunasDaTabela(perfilId: string, tabela: string): Promise<ColunaTabela[]> {
   try { return await invoke<ColunaTabela[]>("table_columns", { profileId: perfilId, relation: tabela }); }
+  catch (e) { throw normalizarErro(e); }
+}
+
+
+
+/** Classificação local de risco (sem rede, sem IA). */
+export async function avaliarRiscoSql(sql: string): Promise<SqlRisk> {
+  try { return await invoke<SqlRisk>("sql_risk_assessment", { sql }); }
   catch (e) { throw normalizarErro(e); }
 }

@@ -14,6 +14,7 @@ import { listarPerfis, consultarStatus } from "../connections/api";
 import { buscarNoNoCatalogo } from "../db-explorer/api";
 import type { ConnectionProfile, ConnectionStatusInfo } from "../connections/types";
 import {
+  avaliarRiscoSql,
   cancelarConsulta,
   chavesDaTabela,
   colunasDaTabela,
@@ -24,7 +25,7 @@ import {
   iniciarTransacao,
   salvarScript,
 } from "./api";
-import type { ApiQueryResult, SqlTab } from "./types";
+import type { ApiQueryResult, SqlRisk, SqlTab } from "./types";
 
 /** Uma execução na grade, com o estado de paginação da consulta. */
 type BlocoResultado = {
@@ -156,6 +157,8 @@ export default function SqlEditorPanel({ openTableRequest, pendingSql, escuro }:
   /** Aba de dados → tabela de origem (habilita edição com WHERE por PK). */
   const [tabelaPorAba, setTabelaPorAba] = useState<Record<string, string>>({});
   const [celulaEmEdicao, setCelulaEmEdicao] = useState<{ bloco: string; linha: number; coluna: number } | null>(null);
+  const [risco, setRisco] = useState<SqlRisk | null>(null);
+  const [pendenteDeConfirmacao, setPendenteDeConfirmacao] = useState<string | null>(null);
   const [valorEmEdicao, setValorEmEdicao] = useState("");
   const [mensagemErro, setMensagemErro] = useState<string | null>(null);
   const [executando, setExecutando] = useState<boolean>(false);
@@ -321,6 +324,19 @@ export default function SqlEditorPanel({ openTableRequest, pendingSql, escuro }:
     const texto = lerConteudo();
     const instrucoes = splitStatements(texto);
     if (instrucoes.length === 0) return;
+
+    // Risco conservador (local, sem IA): escrita/estrutura exigem confirmação.
+    const avaliacao = await avaliarRiscoSql(texto).catch(() => null);
+    setRisco(avaliacao);
+    if (avaliacao?.exigeConfirmacao) {
+      setPendenteDeConfirmacao(texto);
+      return;
+    }
+    await executarAgora(instrucoes);
+  }, [perfilId, abaAtiva, tabelaPorAba]);
+
+  /** Executa de fato (a confirmação de risco já passou ou foi dispensada). */
+  const executarAgora = useCallback(async (instrucoes: string[]) => {
     setExecutando(true);
     setMensagemErro(null);
     setBlocos([]);
@@ -647,6 +663,60 @@ export default function SqlEditorPanel({ openTableRequest, pendingSql, escuro }:
       </div>
 
       {mensagemErro && <div role="alert" style={estilo.erro}>{mensagemErro}</div>}
+      {risco && (
+        <div
+          role="status"
+          style={{
+            fontSize: "0.8rem",
+            color:
+              risco.nivel === "leitura" || risco.nivel === "transacao" ? "#217a3b" : "#8a1c22",
+            marginBottom: "0.4rem",
+          }}
+        >
+          Risco: <strong>{risco.rotulo}</strong>
+          {risco.exigeConfirmacao && " — exige confirmação antes de executar"}
+          {" · "}
+          {risco.motivos.join(" · ")}
+        </div>
+      )}
+
+      {pendenteDeConfirmacao !== null && risco?.exigeConfirmacao && (
+        <div
+          role="alertdialog"
+          aria-label="Confirmação de risco"
+          style={{
+            border: "1px solid #a4262c",
+            background: "#fdf2f2",
+            color: "#5c1015",
+            borderRadius: "6px",
+            padding: "0.75rem 1rem",
+            marginBottom: "0.75rem",
+          }}
+        >
+          <strong>Esta instrução é classificada como {risco.rotulo}.</strong>
+          <ul style={{ margin: "0.35rem 0", paddingLeft: "1.2rem" }}>
+            {risco.motivos.map((m) => (
+              <li key={m}>{m}</li>
+            ))}
+          </ul>
+          {risco.multiplasInstrucoes && (
+            <p style={{ margin: "0 0 0.35rem" }}>O texto tem mais de uma instrução.</p>
+          )}
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              style={{ ...estilo.botao, borderColor: "#a4262c", color: "#a4262c" }}
+              onClick={() => void executarAgora(splitStatements(pendenteDeConfirmacao)).finally(() => setPendenteDeConfirmacao(null))}
+            >
+              Executar mesmo assim
+            </button>
+            <button type="button" style={estilo.botao} onClick={() => setPendenteDeConfirmacao(null)}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
       {mensagemTransacao && (
         <div role="status" style={{ fontSize: "0.85rem", color: emTransacao ? "#8a5a00" : "#217a3b", marginBottom: "0.5rem" }}>
           {mensagemTransacao}

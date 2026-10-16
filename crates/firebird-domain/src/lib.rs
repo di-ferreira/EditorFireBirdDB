@@ -9,6 +9,7 @@ pub mod catalog;
 pub mod connection;
 pub mod error;
 pub mod metadata;
+pub mod risk;
 pub mod version;
 
 /// Versão do crate de domínio (`Cargo.toml`), exposta para a UI do app.
@@ -29,6 +30,7 @@ pub use connection::{
 };
 pub use error::{redigir_segredo, DomainError};
 pub use metadata::{FieldInfo, RelationKind, RelationSummary};
+pub use risk::{avaliar_sql, AvaliacaoRisco, NivelRisco};
 pub use version::ServerVersion;
 
 #[cfg(test)]

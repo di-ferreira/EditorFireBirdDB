@@ -6,7 +6,7 @@
 [![Plataforma](https://img.shields.io/badge/plataforma-Linux%20x86__64-orange.svg)](docs/specs/01-compatibilidade-firebird.md)
 [![Firebird](https://img.shields.io/badge/Firebird-2.0%20%E2%80%93%205.0-green.svg)](docs/compatibility/)
 
-> **Status:** Fase 2 (DB Explorer + SQL Editor) concluída e validada contra um banco
+> **Status:** Fase 3 (IA contextual) — passos 1 a 4 implementados; Fase 2 (DB Explorer + SQL Editor) concluída e validada contra um banco
 > Firebird real (2.5.9): CI, persistência SQLite, cofre de segredos, gerenciador de
 > conexões, catálogo sob demanda, editor SQL com CodeMirror, execução de consultas com
 > grade rolável, histórico e scripts salvos. Firebird **2.5.9, 3.0.10, 4.0.0 e 5.0.0**
