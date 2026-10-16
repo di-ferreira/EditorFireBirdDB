@@ -2,9 +2,14 @@
 
 ## Suporte a versões
 
-Como o projeto ainda está em Fase 0 (prova de conceito), **nenhuma versão é considerada
-estável para produção**. Após o primeiro release, correções de segurança serão aplicadas
-apenas na versão mais recente, salvo acordo explícito do mantenedor.
+O projeto publicou a **primeira release (`v0.1.0`)**. Correções de segurança são
+aplicadas **apenas na versão mais recente**; versões anteriores recebem correção apenas
+com acordo explícito do mantenedor.
+
+| Série | Status |
+|---|---|
+| `0.1.x` (atual) | suportada — recebe correções |
+| anteriores | sem suporte de segurança |
 
 Atenção: Firebird 2.0/2.1/2.5 são séries oficialmente descontinuadas (EOL). O Firebird
 Studio Linux sinaliza essas versões no produto, mas **não** pode mitigar vulnerabilidades
@@ -34,3 +39,31 @@ Você receberá confirmação do recebimento em até 72 horas e uma avaliação 
 - Sem telemetria por padrão; envio a provedores remotos de IA é visível e confirmável.
 - Nenhum credencial de serviço externo embutida em builds.
 - Cada release publica SBOM e changelog ([Spec 15](docs/specs/15-governanca.md)).
+
+## Superfície do aplicativo (0.1.0)
+
+O que **entra** e o que **não entra** no escopo de segurança:
+
+| Área | Estado |
+|---|---|
+| Segredos (senhas de conexão, chaves de API) | só no cofre do sistema; o SQLite guarda `secret_ref` |
+| Redação em logs/erros/DTO | valores após `password=`, `passwd=`, `pwd=`, `token=` viram `***` |
+| Frontend (WebView) | CSP `default-src 'self' blob:`; sem shell/plugin genérico exposto à UI |
+| Rede de saída | apenas para o **servidor Firebird** e para o **provedor de IA configurado** |
+| IA | SQL sugerido **nunca** é executado automaticamente; escrita/DDL exigem confirmação |
+| Envio de contexto a provedor remoto | exige consentimento explícito por perfil |
+| Permissões Tauri | apenas `core:default` (validado em teste) |
+| Telemetria | nenhuma |
+
+### SBOM
+
+Cada release publica o inventário de componentes em
+[`docs/security/sbom.cdx.json`](docs/security/sbom.cdx.json) (CycloneDX 1.5), gerado de
+`Cargo.lock` e `pnpm-lock.yaml` por `scripts/gen_sbom.py` (sem rede). Para conferir:
+
+```sh
+python3 scripts/gen_sbom.py | diff - docs/security/sbom.cdx.json && echo SBOM atualizado
+```
+
+As **licenças** não vêm dos lockfiles e por isso aparecem como `NOASSERTION` no SBOM; o
+inventário de licenças continua em [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

@@ -13,6 +13,17 @@
 > foram validados no checklist PoC (6/6 cada); **2.0/2.1 seguem não testados** — nenhuma
 > versão é declarada "suportada" sem evidência de teste reproduzível.
 
+## Instalação
+
+```sh
+sudo apt install "./Firebird.Studio.Linux_0.1.0_amd64.deb"
+```
+
+Guia completo (biblioteca cliente, conexão, IA, diagnóstico):
+**[`docs/instalacao.md`](docs/instalacao.md)** ·
+Matriz de compatibilidade: **[`docs/compatibility/MATRIX.md`](docs/compatibility/MATRIX.md)** ·
+SBOM: **`docs/security/sbom.cdx.json`** · Segurança: **[`SECURITY.md`](SECURITY.md)**
+
 ## Proposta
 
 O Firebird Studio Linux é uma aplicação desktop para conectar e administrar bancos

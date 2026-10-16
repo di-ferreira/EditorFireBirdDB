@@ -155,6 +155,17 @@ Baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
     diálogo de confirmação com os motivos. `SELECT` passa direto.
   - Assistente: aceitar uma sugestão com risco exige confirmação explícita, e o
     SQL só é inserido no editor — **nunca executado**.
+- **Fase 4 — Estabilização e distribuição**:
+  - Pacote `.deb` como entrega principal (`bundle.active`, alvo `deb`, dependências
+    `libwebkit2gtk-4.1-0`, `libgtk-3-0`, `libssl3`, `ca-certificates`; recomenda
+    `libfbclient2`); janela padrão 1440×900.
+  - Release `v0.1.0` publicada com o `.deb` e arquivo `.sha256`.
+  - Guia de instalação em `docs/instalacao.md` (pacote, código-fonte, biblioteca
+    cliente, primeiro uso, IA, diagnóstico).
+  - Matriz de compatibilidade publicada em `docs/compatibility/MATRIX.md`.
+  - SBOM CycloneDX 1.5 gerado por `scripts/gen_sbom.py` (613 componentes a partir de
+    `Cargo.lock` + `pnpm-lock.yaml`, sem rede).
+  - `SECURITY.md` com séries suportadas, superfície do aplicativo e verificação do SBOM.
 - Estrutura inicial do repositório (monorepo pnpm + workspace Cargo Rust).
 - Especificação técnica extraída por tema em `docs/specs/` (17 documentos, do documento
   original v0.1 preservado em `docs/original/`).
