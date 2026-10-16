@@ -26,14 +26,14 @@ const estilos = {
     fontFamily:
       'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif',
     margin: "0",
-    padding: "2rem",
+    padding: "1rem",
     minHeight: "100vh",
     boxSizing: "border-box" as const,
     background: "#f7f8fa",
     color: "#1c1e21",
   },
   cartao: {
-    maxWidth: "60rem",
+    maxWidth: "100%",
     margin: "0 auto",
     background: "#ffffff",
     border: "1px solid #d9dce1",
@@ -195,8 +195,16 @@ export default function App(): JSX.Element {
           aria-labelledby="aba-sql"
           hidden={aba !== "sql"}
         >
-          {/* Montado apenas quando a aba é aberta. */}
-          {aba === "sql" && <SqlEditorPanel />}
+          {aba === "sql" && (
+            <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: "1rem", alignItems: "start" }}>
+              <div style={{ overflow: "auto", maxHeight: "70vh" }}>
+                <DbExplorerPanel />
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <SqlEditorPanel />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </main>
