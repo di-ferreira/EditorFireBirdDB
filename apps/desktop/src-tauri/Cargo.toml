@@ -24,6 +24,9 @@ firebird-storage = { path = "../../../crates/firebird-storage" }
 firebird-security = { path = "../../../crates/firebird-security" }
 # `thiserror` só para os enums de erro da camada de aplicação.
 thiserror = "2"
+# Transporte HTTP das chamadas ao provedor de IA (Passo 1 da Fase 3).
+# `rustls-tls` evita depender do OpenSSL do sistema.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 
 [dev-dependencies]
 # Usado apenas nos testes: validação de que as capabilities concedem

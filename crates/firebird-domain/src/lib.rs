@@ -4,6 +4,7 @@
 //! `thiserror` para erros tipados. Ver [`ServerVersion`], [`DomainError`] e
 //! os modelos de metadados em [`metadata`].
 
+pub mod ai;
 pub mod catalog;
 pub mod connection;
 pub mod error;
@@ -17,6 +18,7 @@ pub mod version;
 /// versão de si mesmo).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+pub use ai::{ErroIa, PedidoIa, ProvedorIaConfig, RespostaIa, TarefaIa, TipoProvedorIa};
 pub use catalog::{
     CategoriaCatalogo, ConstraintInfo, ConstraintTipo, DominioInfo, GeneratorInfo, IndiceInfo,
     InfoBanco, ParametroInfo, ProceduraInfo, TriggerInfo,

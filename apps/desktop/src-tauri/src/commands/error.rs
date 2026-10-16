@@ -51,6 +51,14 @@ impl CommandError {
         }
     }
 
+    /// Falha no provedor de IA (configuração, rede ou resposta).
+    pub fn provedor(mensagem: impl std::fmt::Display) -> Self {
+        Self {
+            code: CommandErrorCode::ProviderError,
+            message: redigir_segredo(&mensagem.to_string()),
+        }
+    }
+
     /// Erro na execução de uma consulta SQL.
     pub fn consulta(mensagem: impl std::fmt::Display) -> Self {
         Self {

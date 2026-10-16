@@ -15,8 +15,8 @@ use std::sync::Mutex;
 
 use firebird_domain::{ConnectionProfile, DadosPerfil, PersistedProfile, ProfileError};
 use firebird_storage::{
-    ConnectionProfileRecord, ConnectionProfileRepository, Db, QueryHistoryRepository,
-    SavedScriptRepository, StorageError,
+    AiProviderProfile, AiProviderProfileRepository, ConnectionProfileRecord,
+    ConnectionProfileRepository, Db, QueryHistoryRepository, SavedScriptRepository, StorageError,
 };
 
 /// Banco local de metadados, seguro para compartilhar entre threads.
@@ -164,6 +164,28 @@ impl BancoLocal {
 
     pub fn delete_script(&self, id: &str) -> Result<bool, firebird_storage::StorageError> {
         ConnectionProfileRepository::delete(&*self.db(), id)
+    }
+}
+
+impl BancoLocal {
+    /// Salva (upsert) o perfil do provedor de IA.
+    pub fn salvar_provedor_ia(&self, p: &AiProviderProfile) -> Result<(), StorageError> {
+        AiProviderProfileRepository::save(&*self.db(), p)
+    }
+
+    /// Lista os provedores de IA configurados.
+    pub fn provedores_ia(&self) -> Result<Vec<AiProviderProfile>, StorageError> {
+        AiProviderProfileRepository::list(&*self.db())
+    }
+
+    /// Busca um provedor de IA pelo id.
+    pub fn obter_provedor_ia(&self, id: &str) -> Result<Option<AiProviderProfile>, StorageError> {
+        AiProviderProfileRepository::get(&*self.db(), id)
+    }
+
+    /// Remove um provedor de IA; `true` quando algo foi removido.
+    pub fn apagar_provedor_ia(&self, id: &str) -> Result<bool, StorageError> {
+        AiProviderProfileRepository::delete(&*self.db(), id)
     }
 }
 

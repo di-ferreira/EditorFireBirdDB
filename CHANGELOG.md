@@ -110,6 +110,22 @@ Baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e
   - Ao abrir uma tabela cujo `SELECT *` estoura o limite de buffer do engine, o
     editor refaz a consulta **sem as colunas largas/BLOB**, avisa quantas foram
     omitidas e reescreve o SQL da aba com o `SELECT` seguro.
+- **Fase 3 — Passo 1: fundação do provedor de IA**:
+  - Plano da fase em `docs/plans/2026-10-16-fase3-ia-contextual.md` (4 passos).
+  - Domínio `firebird_domain::ai`: `TipoProvedorIa`, `ProvedorIaConfig` (detecta
+    provedor local), `PedidoIa`, `RespostaIa`, `ErroIa` (Debug redigido).
+  - Storage: repositório da tabela `ai_provider_profiles` (Spec 09) com
+    `secret_ref` — nenhuma chave em coluna/Log/DTO.
+  - Aplicação: `TransporteHttp` injetável, `ProvedorOpenAiCompat`
+    (Ollama/LM Studio/OpenAI), `TransporteReqwest` (rustls, sem proxy herdado) e
+    `IaService` que resolve a chave no cofre, preserva a chave na edição e apaga
+    segredo órfão junto do perfil.
+  - Comandos `ia_provider_list`, `ia_provider_save`, `ia_provider_test`,
+    `ia_provider_delete` (DTO sem chave; apenas `hasApiKey`).
+  - Consentimento remoto (`remote_context_confirmation`) bloqueia o envio de
+    contexto a provedor não-local.
+  - UI `features/ai-assistant` (aba "IA"): listar, criar, editar, testar e remover
+    provedor, com pt-BR e estados.
 - Estrutura inicial do repositório (monorepo pnpm + workspace Cargo Rust).
 - Especificação técnica extraída por tema em `docs/specs/` (17 documentos, do documento
   original v0.1 preservado em `docs/original/`).

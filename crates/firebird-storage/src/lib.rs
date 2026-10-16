@@ -9,6 +9,7 @@
 //! guardam apenas `secret_ref`, ponteiro para o cofre do sistema (FR-016).
 //! Todo SQL é parametrizado — nenhuma concatenação de valor do usuário.
 
+pub mod ai_provider_profiles;
 pub mod connection_profiles;
 pub mod migrations;
 pub mod query_history;
@@ -19,6 +20,7 @@ mod redact;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub use ai_provider_profiles::{AiProviderProfile, AiProviderProfileRepository};
 pub use connection_profiles::{ConnectionProfileRecord, ConnectionProfileRepository};
 pub use query_history::{QueryHistoryEntry, QueryHistoryRepository};
 pub use saved_scripts::{SavedScript, SavedScriptRepository};

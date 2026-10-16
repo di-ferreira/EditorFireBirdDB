@@ -1,0 +1,240 @@
+import { useCallback, useEffect, useState, type JSX } from "react";
+
+import { apagarProvedor, listarProvedores, salvarProvedor, testarProvedor } from "./api";
+import type { ProvedorIaDto } from "./types";
+
+type Estado = "carregando" | "pronto" | "erro";
+
+/**
+ * Passo 1 da Fase 3 — configuração de provedores de IA.
+ *
+ * A chave da API é enviada **uma única vez** no formulário e vai direto para o
+ * cofre do sistema: a lista mostra apenas se existe chave, nunca o valor.
+ */
+export default function AiAssistantPanel(): JSX.Element {
+  const [estado, setEstado] = useState<Estado>("carregando");
+  const [mensagem, setMensagem] = useState("");
+  const [erro, setErro] = useState<string | null>(null);
+  const [provedores, setProvedores] = useState<ProvedorIaDto[]>([]);
+  const [salvando, setSalvando] = useState(false);
+  const [testandoId, setTestandoId] = useState<string | null>(null);
+
+  const [form, setForm] = useState({
+    id: "",
+    nome: "",
+    tipo: "openai_compat",
+    baseUrl: "http://localhost:11434/v1",
+    modelo: "",
+    apiKey: "",
+    consentirContextoRemoto: false,
+  });
+
+  const carregar = useCallback(async () => {
+    setEstado("carregando");
+    try {
+      setProvedores(await listarProvedores());
+      setEstado("pronto");
+    } catch (e: any) {
+      setErro(e?.message ?? String(e));
+      setEstado("erro");
+    }
+  }, []);
+
+  useEffect(() => {
+    void carregar();
+  }, [carregar]);
+
+  const salvar = useCallback(async () => {
+    setSalvando(true);
+    setErro(null);
+    setMensagem("");
+    try {
+      await salvarProvedor({
+        id: form.id || undefined,
+        nome: form.nome,
+        tipo: form.tipo,
+        baseUrl: form.baseUrl,
+        modelo: form.modelo,
+        apiKey: form.apiKey || undefined,
+        consentirContextoRemoto: form.consentirContextoRemoto,
+      });
+      setForm({ ...form, id: "", apiKey: "", nome: "", modelo: "" });
+      setMensagem("Provedor salvo. A chave, se informada, foi para o cofre do sistema.");
+      await carregar();
+    } catch (e: any) {
+      setErro(e?.message ?? String(e));
+    } finally {
+      setSalvando(false);
+    }
+  }, [form, carregar]);
+
+  const testar = useCallback(async (id: string) => {
+    setTestandoId(id);
+    setErro(null);
+    try {
+      setMensagem(await testarProvedor(id));
+    } catch (e: any) {
+      setErro(e?.message ?? String(e));
+    } finally {
+      setTestandoId(null);
+    }
+  }, []);
+
+  const apagar = useCallback(
+    async (id: string) => {
+      try {
+        await apagarProvedor(id);
+        setMensagem("Provedor removido (perfil e chave do cofre).");
+        await carregar();
+      } catch (e: any) {
+        setErro(e?.message ?? String(e));
+      }
+    },
+    [carregar],
+  );
+
+  const estilos = {
+    painel: { display: "flex", flexDirection: "column" as const, gap: "1rem", maxWidth: "60rem" },
+    cartao: { background: "#ffffff", border: "1px solid #d9dce1", borderRadius: "8px", padding: "1rem" },
+    linha: { display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" as const, marginBottom: "0.5rem" },
+    entrada: { padding: "0.4rem 0.5rem", border: "1px solid #b7bcc4", borderRadius: "4px", minWidth: "14rem" },
+    rotulo: { display: "flex", flexDirection: "column" as const, gap: "0.2rem", fontSize: "0.85rem" },
+    botao: { padding: "0.4rem 0.8rem", cursor: "pointer", borderRadius: "4px", border: "1px solid #b7bcc4", background: "#ffffff" },
+    botaoPrimario: { padding: "0.4rem 0.9rem", cursor: "pointer", borderRadius: "4px", border: "1px solid #1b5e9c", background: "#1b5e9c", color: "#ffffff" },
+    aviso: { padding: "0.75rem 1rem", borderRadius: "6px", background: "#eef6ff", color: "#123a5c" },
+    erro: { padding: "0.75rem 1rem", borderRadius: "6px", background: "#fdf2f2", color: "#8a1c22" },
+  };
+
+  return (
+    <section style={estilos.painel} aria-labelledby="ia-titulo">
+      <h2 id="ia-titulo" style={{ margin: 0, fontSize: "1.15rem" }}>
+        Assistente de IA — provedores
+      </h2>
+      <p style={{ margin: 0, fontSize: "0.9rem", color: "#4a4d52" }}>
+        Configure um provedor compatível com a API da OpenAI (Ollama, LM Studio, vLLM ou
+        OpenAI). A chave de API fica no cofre do sistema — nunca no banco local nem na tela.
+      </p>
+
+      {erro && <div role="alert" style={estilos.erro}>{erro}</div>}
+      {mensagem && <div role="status" style={estilos.aviso}>{mensagem}</div>}
+
+      <div style={estilos.cartao}>
+        <h3 style={{ marginTop: 0, fontSize: "1rem" }}>{form.id ? "Editar provedor" : "Novo provedor"}</h3>
+        <div style={estilos.linha}>
+          <label style={estilos.rotulo}>
+            Nome
+            <input
+              style={estilos.entrada}
+              value={form.nome}
+              onChange={(e) => setForm({ ...form, nome: e.target.value })}
+              placeholder="Ollama local"
+            />
+          </label>
+          <label style={estilos.rotulo}>
+            URL base
+            <input
+              style={estilos.entrada}
+              value={form.baseUrl}
+              onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
+              placeholder="http://localhost:11434/v1"
+            />
+          </label>
+        </div>
+        <div style={estilos.linha}>
+          <label style={estilos.rotulo}>
+            Modelo
+            <input
+              style={estilos.entrada}
+              value={form.modelo}
+              onChange={(e) => setForm({ ...form, modelo: e.target.value })}
+              placeholder="qwen2.5-coder"
+            />
+          </label>
+          <label style={estilos.rotulo}>
+            Chave da API (fica no cofre)
+            <input
+              style={estilos.entrada}
+              type="password"
+              value={form.apiKey}
+              onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
+              placeholder={form.id ? "deixe vazio para manter a atual" : "sk-…"}
+              autoComplete="off"
+            />
+          </label>
+        </div>
+        <div style={estilos.linha}>
+          <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem" }}>
+            <input
+              type="checkbox"
+              checked={form.consentirContextoRemoto}
+              onChange={(e) => setForm({ ...form, consentirContextoRemoto: e.target.checked })}
+            />
+            Autorizo enviar o esquema do banco para este provedor remoto
+          </label>
+          <button type="button" style={estilos.botaoPrimario} onClick={() => void salvar()} disabled={salvando}>
+            {salvando ? "Salvando…" : "Salvar provedor"}
+          </button>
+          {form.id && (
+            <button type="button" style={estilos.botao} onClick={() => setForm({ ...form, id: "", apiKey: "" })}>
+              Cancelar edição
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div style={estilos.cartao}>
+        <h3 style={{ marginTop: 0, fontSize: "1rem" }}>Provedores configurados</h3>
+        {estado === "carregando" && <div role="status">Carregando provedores…</div>}
+        {estado === "erro" && (
+          <button type="button" style={estilos.botao} onClick={() => void carregar()}>
+            Tentar novamente
+          </button>
+        )}
+        {estado === "pronto" && provedores.length === 0 && (
+          <p role="status" style={{ margin: 0, color: "#4a4d52" }}>
+            Nenhum provedor configurado ainda.
+          </p>
+        )}
+        {estado === "pronto" && provedores.length > 0 && (
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {provedores.map((p) => (
+              <li key={p.id} style={{ borderBottom: "1px solid #eee", padding: "0.5rem 0" }}>
+                <div style={estilos.linha}>
+                  <strong>{p.name}</strong>
+                  <span style={{ color: "#4a4d52", fontSize: "0.85rem" }}>
+                    {p.providerType} · {p.baseUrl} · {p.modelName}
+                  </span>
+                  {p.hasApiKey && <span style={{ fontSize: "0.75rem" }}>🔑 chave no cofre</span>}
+                  {p.remoteContextConfirmation && (
+                    <span style={{ fontSize: "0.75rem" }}>contexto remoto autorizado</span>
+                  )}
+                </div>
+                <div style={estilos.linha}>
+                  <button type="button" style={estilos.botao} onClick={() => void testar(p.id)} disabled={testandoId === p.id}>
+                    {testandoId === p.id ? "Testando…" : "Testar"}
+                  </button>
+                  <button
+                    type="button"
+                    style={estilos.botao}
+                    onClick={() => setForm({ id: p.id, nome: p.name, tipo: p.providerType, baseUrl: p.baseUrl, modelo: p.modelName, apiKey: "", consentirContextoRemoto: p.remoteContextConfirmation })}
+                  >
+                    Editar
+                  </button>
+                  <button type="button" style={estilos.botao} onClick={() => void apagar(p.id)}>
+                    Remover
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div style={estilos.aviso}>
+        <strong>Próximos passos (Fase 3):</strong> contexto do schema, templates versionados,
+        geração/explicação/correção, revisão de SQL com classificação de risco. Nenhum SQL
+        gerado pela IA é executado automaticamente.
+      </div>
+    </section>
+  );
+}
