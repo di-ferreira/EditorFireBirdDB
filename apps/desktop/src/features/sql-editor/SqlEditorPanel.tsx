@@ -105,7 +105,7 @@ const splitStatements = (sql: string): string[] => {
   return out;
 };
 
-export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?: { perfilId: string; table: string; nonce: number } | null } = {}): JSX.Element {
+export default function SqlEditorPanel({ openTableRequest, escuro }: { openTableRequest?: { perfilId: string; table: string; nonce: number } | null; escuro?: boolean } = {}): JSX.Element {
   const [perfilId, setPerfilId] = useState<string>("");
   const [perfis, setPerfis] = useState<ConnectionProfile[]>([]);
   const [statusPorPerfil, setStatusPorPerfil] = useState<Record<string, ConnectionStatusInfo>>({});
@@ -118,7 +118,6 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
   const [objetos, setObjetos] = useState<{ nome: string; kind: string }[]>([]);
   const [carregandoObjetos, setCarregandoObjetos] = useState(false);
   const [visibleRows, setVisibleRows] = useState(100);
-  const [escuro, setEscuro] = useState<boolean>(() => (typeof window !== "undefined" && window.localStorage.getItem("fb-tema") === "escuro"));
 
   const carregarObjetos = useCallback(async (perfil: string) => {
     if (!perfil) { setObjetos([]); return; }
@@ -134,6 +133,17 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
         } catch { /* ignora */ }
       }
       setObjetos(linhas);
+
+      // Campos das tabelas (limitado) para o autocomplete de colunas.
+      const mapa: Record<string, string[]> = {};
+      const tabelas = linhas.filter((l) => l.kind === "tabelas").slice(0, 40);
+      for (const t of tabelas) {
+        try {
+          const campos = await buscarNoNoCatalogo(perfil, { kind: "campos", relacao: t.nome }, null, false, false);
+          mapa[t.nome] = (campos.children ?? []).map((c) => c.label.trim());
+        } catch { /* ignora */ }
+      }
+      camposPorTabelaRef.current = mapa;
     } finally {
       setCarregandoObjetos(false);
     }
@@ -143,6 +153,7 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
   const viewRef = useRef<EditorView | null>(null);
   const executarRef = useRef<(() => Promise<void>) | null>(null);
   const objetosRef = useRef<{ nome: string; kind: string }[]>([]);
+  const camposPorTabelaRef = useRef<Record<string, string[]>>({});
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const carregarPerfis = useCallback(async () => {
@@ -160,7 +171,6 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
   }, [perfilId]);
 
   useEffect(() => { void carregarPerfis(); }, [carregarPerfis]);
-  useEffect(() => { window.localStorage.setItem("fb-tema", escuro ? "escuro" : "claro"); }, [escuro]);
   useEffect(() => { void carregarObjetos(perfilId); }, [perfilId, carregarObjetos]);
 
   const aba = abas.find((a) => a.id === abaAtiva) ?? abas[0];
@@ -171,9 +181,11 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
     const fonteCompletacao = (context: CompletionContext) => {
       const word = context.matchBefore(/\w*/);
       if (!word || (word.from === word.to && !context.explicit)) return null;
+      const nomesDeCampos = Array.from(new Set(Object.values(camposPorTabelaRef.current).flat()));
       const itens = [
         ...palavrasChave.map((k) => ({ label: k, type: "keyword" })),
         ...objetosRef.current.map((o) => ({ label: o.nome, type: o.kind, info: o.kind })),
+        ...nomesDeCampos.map((c) => ({ label: c, type: "field", info: "campo" })),
       ];
       const lower = word.text.toLowerCase();
       const filtrados = itens.filter((i) => i.label.toLowerCase().startsWith(lower));
@@ -342,9 +354,6 @@ export default function SqlEditorPanel({ openTableRequest }: { openTableRequest?
         </button>
         <button type="button" style={estilo.botao} onClick={() => novaAba()}>
           Nova aba
-        </button>
-        <button type="button" style={estilo.botao} onClick={() => setEscuro((v) => !v)}>
-          {escuro ? "☀️" : "🌙"} Tema
         </button>
       </div>
 

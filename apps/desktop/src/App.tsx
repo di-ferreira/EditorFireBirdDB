@@ -96,6 +96,7 @@ const ABAS: { id: Aba; rotulo: string }[] = [
  */
 export default function App(): JSX.Element {
   const [aba, setAba] = useState<Aba>("saude");
+  const [temaEscuro, setTemaEscuro] = useState<boolean>(() => (typeof window !== "undefined" && window.localStorage.getItem("fb-tema") === "escuro"));
   const [pendingOpenTable, setPendingOpenTable] = useState<{ perfilId: string; table: string; nonce: number } | null>(null);
   const [estado, setEstado] = useState<Estado>({ fase: "carregando" });
 
@@ -114,10 +115,31 @@ export default function App(): JSX.Element {
     void carregarSaude();
   }, [carregarSaude]);
 
+  useEffect(() => {
+    window.localStorage.setItem("fb-tema", temaEscuro ? "escuro" : "claro");
+  }, [temaEscuro]);
+
   return (
-    <main style={estilos.raiz}>
+    <main
+      style={{ ...estilos.raiz, background: temaEscuro ? "#121417" : "#f7f8fa", color: temaEscuro ? "#e8eaed" : "#1c1e21" }}
+      className={temaEscuro ? "dark-mode" : "light-mode"}
+    >
+      {temaEscuro && (
+        <style>{`
+.dark-mode, .dark-mode * { color: #e8eaed; }
+.dark-mode [style*="background: #fff"], .dark-mode [style*="background: #ffffff"] { background: #1b1f26 !important; }
+.dark-mode [style*="background: #f7f8fa"], .dark-mode [style*="background: #f0f1f4"] { background: #171b21 !important; }
+.dark-mode [style*="border"] { border-color: #3b4048 !important; }
+.dark-mode input, .dark-mode select, .dark-mode button, .dark-mode textarea { background: #23272f !important; color: #e8eaed !important; border-color: #3b4048 !important; }
+`}</style>
+      )}
       <div style={estilos.cartao}>
-        <h1 style={{ marginTop: 0, fontSize: "1.4rem" }}>Firebird Studio Linux</h1>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <h1 style={{ marginTop: 0, fontSize: "1.4rem" }}>Firebird Studio Linux</h1>
+          <button type="button" style={estilos.botao} onClick={() => setTemaEscuro((v) => !v)}>
+            {temaEscuro ? "☀️" : "🌙"} Tema
+          </button>
+        </div>
 
         <div style={estilos.abas} role="tablist" aria-label="Seções do aplicativo">
           {ABAS.map((item) => (
@@ -199,7 +221,7 @@ export default function App(): JSX.Element {
         >
           {aba === "sql" && (
             <div style={{ display: "block" }}>
-              <SqlEditorPanel openTableRequest={pendingOpenTable} />
+              <SqlEditorPanel openTableRequest={pendingOpenTable} escuro={temaEscuro} />
             </div>
           )}
         </div>
