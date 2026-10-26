@@ -7,5 +7,5 @@ description = "Persistência local do Firebird Studio Linux: SQLite versionado p
 
 [dependencies]
 # `bundled` compila o próprio SQLite: o app não depende de libsqlite do sistema.
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 thiserror = "2"
